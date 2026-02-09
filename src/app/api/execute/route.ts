@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
       started_at: new Date().toISOString() 
     });
     
-    const updatedTask = tasksDb.getById(taskId);
+    const updatedTask = tasksDb.getById(taskId) as Record<string, any> | undefined;
     emitTaskUpdate('task:updated', updatedTask);
 
     // Smart agent routing based on keywords
