@@ -322,7 +322,8 @@ export default function Dashboard() {
       
       const data = await res.json();
       if (data.success) {
-        setSelectedTask(null);
+        // Close modal and clear conversation
+        closeTaskModal();
         // Trigger execution
         await fetch('/api/execute', {
           method: 'POST',
