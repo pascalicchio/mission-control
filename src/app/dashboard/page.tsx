@@ -86,6 +86,8 @@ export default function Dashboard() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'executing' | 'done'>('all');
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -105,7 +107,14 @@ export default function Dashboard() {
       initSocket();
     }
     setLoading(false);
-  }, [router]);
+
+    return () => {
+      // Cleanup polling interval
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [router, pollingInterval]);
 
   const loadData = async () => {
     try {
@@ -221,56 +230,26 @@ export default function Dashboard() {
   };
 
   const initSocket = useCallback(() => {
-    if (socket) return; // Already connected
+    // Socket.IO doesn't work on Vercel's serverless environment
+    // Use polling fallback instead
+    setSocketConnected(true);
     
-    const socketIo = io({
-      path: '/api/socket',
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
-
-    socketIo.on('connect', () => {
-      console.log('🔌 Socket connected');
-      socketIo.emit('subscribe', 'tasks');
-      socketIo.emit('subscribe', 'agents');
-      socketIo.emit('subscribe', 'activity');
-    });
-
-    socketIo.on('task:created', (task: Task) => {
-      setTasks(prev => {
-        if (prev.find(t => t.id === task.id)) return prev;
-        return [task, ...prev];
-      });
-    });
-
-    socketIo.on('task:updated', (task: Task) => {
-      setTasks(prev => prev.map(t => t.id === task.id ? task : t));
-    });
-
-    socketIo.on('task:completed', (task: Task) => {
-      setTasks(prev => prev.map(t => t.id === task.id ? task : t));
-      playSound('complete');
-    });
-
-    socketIo.on('task:deleted', ({ id }: { id: string }) => {
-      setTasks(prev => prev.filter(t => t.id !== id));
-    });
-
-    socketIo.on('agent:update', (agentsData: Agent[]) => {
-      setAgents(agentsData);
-    });
-
-    socketIo.on('activity:new', (activity: Activity) => {
-      setActivities(prev => [activity, ...prev].slice(0, 50));
-    });
-
-    setSocket(socketIo);
-
-    return () => {
-      socketIo.disconnect();
-    };
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch('/api/tasks');
+        const data = await res.json();
+        if (data.tasks) {
+          setTasks(data.tasks);
+        }
+        if (data.agents) {
+          setAgents(data.agents);
+        }
+      } catch (error) {
+        // Silently fail - polling is best effort
+      }
+    }, 5000); // Poll every 5 seconds
+    
+    setPollingInterval(poll);
   }, []);
 
   const handleLogout = () => {
@@ -373,10 +352,10 @@ export default function Dashboard() {
           </div>
           
           <div className="flex items-center gap-4">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${socket?.connected ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
-              <span className={`w-2 h-2 rounded-full ${socket?.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
-              <span className={`text-xs ${socket?.connected ? 'text-green-400' : 'text-red-400'}`}>
-                {socket?.connected ? 'WebSocket Active' : 'Connecting...'}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${socketConnected ? 'bg-green-500/10 border border-green-500/20' : 'bg-yellow-500/10 border border-yellow-500/20'}`}>
+              <span className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`}></span>
+              <span className={`text-xs ${socketConnected ? 'text-green-400' : 'text-yellow-400'}`}>
+                {socketConnected ? 'Live Updates' : 'Polling...'}
               </span>
             </div>
             <button onClick={handleLogout} className="glass-button text-sm">
