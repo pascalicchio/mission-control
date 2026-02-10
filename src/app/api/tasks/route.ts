@@ -97,7 +97,7 @@ export async function PATCH(request: NextRequest) {
       
       if (status === 'done' || status === 'failed') {
         updates.completed_at = new Date().toISOString();
-        const startedAt = tasksDb.getById(id)?.started_at;
+        const startedAt = (tasksDb.getById(id) as Record<string, any> | undefined)?.started_at;
         if (startedAt) {
           updates.duration = Math.round(
             (new Date().getTime() - new Date(startedAt).getTime()) / 1000
