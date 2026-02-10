@@ -1,17 +1,25 @@
-import * as admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 
-// Initialize Firebase Admin
-const serviceAccount = JSON.parse(readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8'));
+// Lazy Firestore client - only initialize when actually needed
+let firestore: any = null;
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://mission-board-70cab.firebaseio.com',
-  });
+async function getFirestore() {
+  if (!firestore) {
+    // Dynamic import to avoid build-time initialization
+    const { initializeApp, cert, applicationDefault } = await import('firebase-admin/app');
+    const { getFirestore: getFirestoreDb } = await import('firebase-admin/firestore');
+    
+    const serviceAccount = JSON.parse(readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8'));
+    
+    const app = initializeApp({
+      credential: cert(serviceAccount),
+      databaseURL: 'https://mission-board-70cab.firebaseio.com',
+    });
+    
+    firestore = getFirestoreDb(app);
+  }
+  return firestore;
 }
-
-const db = admin.firestore();
 
 // Interfaces
 interface Task {
@@ -97,41 +105,60 @@ const defaultAgents: Agent[] = [
   { id: 'miles', name: 'Miles', emoji: '🕸️', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 0, success_rate: 86 },
 ];
 
-// Initialize agents in Firestore on first run
-async function initAgents() {
-  const snapshot = await db.collection('agents').count().get();
-  if (snapshot.data().count === 0) {
-    const batch = db.batch();
-    for (const agent of defaultAgents) {
-      batch.set(db.collection('agents').doc(agent.id), agent);
+// Initialize agents lazily
+let agentsInitialized = false;
+async function initAgents(db: any) {
+  if (agentsInitialized) return;
+  try {
+    const snapshot = await db.collection('agents').limit(1).get();
+    if (snapshot.empty) {
+      const batch = db.batch();
+      for (const agent of defaultAgents) {
+        batch.set(db.collection('agents').doc(agent.id), agent);
+      }
+      await batch.commit();
     }
-    await batch.commit();
+    agentsInitialized = true;
+  } catch (e) {
+    // Ignore - will retry on first actual use
+    console.log('Agents initialization deferred');
   }
 }
-initAgents().catch(console.error);
 
 // Tasks
 export const tasksDb = {
   getAll: async (): Promise<Task[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('tasks').orderBy('created_at', 'desc').get();
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
   },
   
   getById: async (id: string): Promise<Task | undefined> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const doc = await db.collection('tasks').doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } as Task : undefined;
   },
   
   addInteraction: async (interaction: Omit<Interaction, 'id'>): Promise<void> => {
-    const snapshot = await db.collection('interactions').where('task_id', '==', interaction.task_id).count().get();
-    const id = snapshot.data().count + 1;
-    await db.collection('interactions').add({ ...interaction, id });
+    const db = await getFirestore();
+    await initAgents(db);
+    try {
+      const snapshot = await db.collection('interactions').where('task_id', '==', interaction.task_id).limit(1).get();
+      const count = snapshot.size;
+      const id = count + 1;
+      await db.collection('interactions').add({ ...interaction, id: String(id) });
+    } catch (e) {
+      await db.collection('interactions').add({ ...interaction, id: '1' });
+    }
   },
   
   create: async (task: Omit<Task, 'id'>): Promise<Task> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const docRef = await db.collection('tasks').add(task);
     
-    // Add creation interaction
     await tasksDb.addInteraction({
       task_id: docRef.id,
       agent: 'System',
@@ -144,11 +171,15 @@ export const tasksDb = {
   },
   
   update: async (id: string, updates: Partial<Task>): Promise<Task | undefined> => {
+    const db = await getFirestore();
+    await initAgents(db);
     await db.collection('tasks').doc(id).update(updates);
     return tasksDb.getById(id);
   },
   
   getInteractions: async (taskId: string): Promise<Interaction[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('interactions').where('task_id', '==', taskId).orderBy('timestamp', 'asc').get();
     return snapshot.docs.map(doc => {
       const data = doc.data();
@@ -164,10 +195,14 @@ export const tasksDb = {
   },
   
   delete: async (id: string): Promise<void> => {
+    const db = await getFirestore();
+    await initAgents(db);
     await db.collection('tasks').doc(id).delete();
   },
   
   clear: async (): Promise<void> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('tasks').get();
     const batch = db.batch();
     snapshot.docs.forEach(doc => batch.delete(doc.ref));
@@ -178,16 +213,22 @@ export const tasksDb = {
 // Agents
 export const agentsDb = {
   getAll: async (): Promise<Agent[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('agents').get();
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Agent));
   },
   
   getById: async (id: string): Promise<Agent | undefined> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const doc = await db.collection('agents').doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } as Agent : undefined;
   },
   
   update: async (id: string, updates: Partial<Agent>): Promise<Agent | undefined> => {
+    const db = await getFirestore();
+    await initAgents(db);
     await db.collection('agents').doc(id).update(updates);
     return agentsDb.getById(id);
   },
@@ -196,16 +237,22 @@ export const agentsDb = {
 // Conversations
 export const conversationsDb = {
   getAll: async (): Promise<Conversation[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('conversations').orderBy('updated_at', 'desc').get();
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Conversation));
   },
   
   getById: async (id: string): Promise<Conversation | undefined> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const doc = await db.collection('conversations').doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } as Conversation : undefined;
   },
   
   create: async (conversation: Omit<Conversation, 'id' | 'status' | 'turns' | 'created_at' | 'updated_at'>): Promise<Conversation> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const now = new Date().toISOString();
     const docRef = await db.collection('conversations').add({
       ...conversation,
@@ -218,6 +265,8 @@ export const conversationsDb = {
   },
   
   addMessage: async (message: Omit<ConversationMessage, 'id' | 'timestamp'>): Promise<void> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const conv = await conversationsDb.getById(message.conversation_id);
     const timestamp = new Date().toISOString();
     
@@ -226,7 +275,6 @@ export const conversationsDb = {
       timestamp,
     });
     
-    // Update conversation
     await db.collection('conversations').doc(message.conversation_id).update({
       turns: message.turn,
       updated_at: timestamp,
@@ -234,6 +282,8 @@ export const conversationsDb = {
   },
   
   getMessages: async (conversationId: string): Promise<ConversationMessage[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('conversation_messages')
       .where('conversation_id', '==', conversationId)
       .orderBy('turn', 'asc')
@@ -254,23 +304,24 @@ export const conversationsDb = {
   },
   
   close: async (id: string): Promise<void> => {
+    const db = await getFirestore();
+    await initAgents(db);
     await db.collection('conversations').doc(id).update({ status: 'closed' });
   },
   
   delete: async (id: string): Promise<void> => {
-    // Delete messages
+    const db = await getFirestore();
+    await initAgents(db);
     const msgSnapshot = await db.collection('conversation_messages').where('conversation_id', '==', id).get();
     const msgBatch = db.batch();
     msgSnapshot.docs.forEach(doc => msgBatch.delete(doc.ref));
     await msgBatch.commit();
     
-    // Delete actions
     const actionSnapshot = await db.collection('extracted_actions').where('conversation_id', '==', id).get();
     const actionBatch = db.batch();
     actionSnapshot.docs.forEach(doc => actionBatch.delete(doc.ref));
     await actionBatch.commit();
     
-    // Delete conversation
     await db.collection('conversations').doc(id).delete();
   },
 };
@@ -278,6 +329,8 @@ export const conversationsDb = {
 // Extracted Actions
 export const extractedActionsDb = {
   getByConversation: async (conversationId: string): Promise<ExtractedAction[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('extracted_actions')
       .where('conversation_id', '==', conversationId)
       .orderBy('id', 'asc')
@@ -299,20 +352,28 @@ export const extractedActionsDb = {
   },
   
   create: async (action: Omit<ExtractedAction, 'id' | 'status'>): Promise<ExtractedAction> => {
-    const snapshot = await db.collection('extracted_actions')
-      .where('conversation_id', '==', action.conversation_id)
-      .count()
-      .get();
-    const id = snapshot.data().count + 1;
-    const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id });
-    return { id, status: 'pending', ...action };
+    const db = await getFirestore();
+    await initAgents(db);
+    try {
+      const snapshot = await db.collection('extracted_actions').where('conversation_id', '==', action.conversation_id).limit(1).get();
+      const id = snapshot.size + 1;
+      const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id: String(id) });
+      return { id, status: 'pending', ...action };
+    } catch (e) {
+      const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id: '1' });
+      return { id: 1, status: 'pending', ...action };
+    }
   },
   
   updateTask: async (id: string, taskId: string): Promise<void> => {
+    const db = await getFirestore();
+    await initAgents(db);
     await db.collection('extracted_actions').doc(id).update({ task_id: taskId, status: 'completed' });
   },
   
   getPending: async (): Promise<ExtractedAction[]> => {
+    const db = await getFirestore();
+    await initAgents(db);
     const snapshot = await db.collection('extracted_actions').where('status', '==', 'pending').get();
     return snapshot.docs.map(doc => {
       const data = doc.data();
@@ -331,6 +392,8 @@ export const extractedActionsDb = {
   },
   
   complete: async (id: string): Promise<void> => {
+    const db = await getFirestore();
+    await initAgents(db);
     await db.collection('extracted_actions').doc(id).update({ status: 'completed' });
   },
 };
