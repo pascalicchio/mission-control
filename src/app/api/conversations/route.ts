@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { conversationsDb, extractedActionsDb, agentsDb } from '@/lib/db';
+import { conversationsDb } from '@/lib/db';
 
 // GET all conversations
 export async function GET() {
-  const conversations = conversationsDb.getAll();
+  const conversations = await conversationsDb.getAll();
   return NextResponse.json(conversations);
 }
 
@@ -11,10 +11,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const { title, topic, participants } = await request.json();
   
-  const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  const conversation = conversationsDb.create({
-    id,
+  const conversation = await conversationsDb.create({
     title,
     topic,
     participants: JSON.stringify(participants),
@@ -25,9 +22,9 @@ export async function POST(request: NextRequest) {
 
 // DELETE all conversations
 export async function DELETE() {
-  const conversations = conversationsDb.getAll();
-  for (const conv of conversations as any[]) {
-    conversationsDb.delete(conv.id);
+  const conversations = await conversationsDb.getAll();
+  for (const conv of conversations) {
+    await conversationsDb.delete(conv.id);
   }
   return NextResponse.json({ success: true, message: 'All conversations deleted' });
 }

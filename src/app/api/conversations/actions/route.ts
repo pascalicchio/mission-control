@@ -7,11 +7,11 @@ export async function GET(request: NextRequest) {
   const conversationId = searchParams.get('conversationId');
   
   if (conversationId) {
-    const actions = extractedActionsDb.getByConversation(conversationId);
+    const actions = await extractedActionsDb.getByConversation(conversationId);
     return NextResponse.json(actions);
   }
   
-  const pending = extractedActionsDb.getPending();
+  const pending = await extractedActionsDb.getPending();
   return NextResponse.json(pending);
 }
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const { actionId, title, priority } = await request.json();
   
   // Get all pending actions and find by ID
-  const pendingActions = extractedActionsDb.getPending();
+  const pendingActions = await extractedActionsDb.getPending();
   const action = pendingActions.find((a: any) => a.id === Number(actionId));
   
   if (!action) {
@@ -28,24 +28,20 @@ export async function POST(request: NextRequest) {
   }
   
   // Create task from action
-  const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const now = new Date().toISOString();
-  
-  tasksDb.create({
-    id: taskId,
+  const task = await tasksDb.create({
     title: title || action.description,
     status: 'pending',
     priority: priority || 'normal',
-    created_at: now,
+    created_at: new Date().toISOString(),
   });
   
   // Mark action as completed
-  extractedActionsDb.complete(String(action.id));
+  await extractedActionsDb.complete(String(action.id));
   
   return NextResponse.json({
     success: true,
-    taskId,
-    task: tasksDb.getById(taskId),
+    taskId: task.id,
+    task,
   });
 }
 
@@ -54,7 +50,7 @@ export async function PATCH(request: NextRequest) {
   const { actionId, status } = await request.json();
   
   if (status === 'completed') {
-    extractedActionsDb.complete(actionId);
+    await extractedActionsDb.complete(actionId);
   }
   
   return NextResponse.json({ success: true });

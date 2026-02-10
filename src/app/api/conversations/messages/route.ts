@@ -1,66 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { conversationsDb, extractedActionsDb } from '@/lib/db';
 
-// GET messages for a conversation
+// GET messages for a conversation or all conversations
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const conversationId = searchParams.get('conversationId');
   
-  if (!conversationId) {
-    return NextResponse.json({ error: 'conversationId required' }, { status: 400 });
+  if (conversationId) {
+    const conversation = await conversationsDb.getById(conversationId);
+    if (!conversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+    
+    const messages = await conversationsDb.getMessages(conversationId);
+    const actions = await extractedActionsDb.getByConversation(conversationId);
+    
+    return NextResponse.json({ conversation, messages, actions });
   }
   
-  const conversation = conversationsDb.getById(conversationId);
-  if (!conversation) {
-    return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
-  }
-  
-  const messages = conversationsDb.getMessages(conversationId);
-  const actions = extractedActionsDb.getByConversation(conversationId);
-  
-  return NextResponse.json({
-    conversation,
-    messages,
-    actions,
-  });
+  const conversations = await conversationsDb.getAll();
+  return NextResponse.json(conversations);
 }
 
 // POST add message to conversation
 export async function POST(request: NextRequest) {
-  const { conversationId, agentId, agentName, agentEmoji, message } = await request.json();
-  
-  const conversation = conversationsDb.getById(conversationId) as any;
-  if (!conversation) {
-    return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+  try {
+    const { conversationId, agentId, agentName, agentEmoji, message } = await request.json();
+    
+    const conversation = await conversationsDb.getById(conversationId);
+    if (!conversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+    
+    const turn = conversation.turns + 1;
+    
+    await conversationsDb.addMessage({
+      conversation_id: conversationId,
+      turn,
+      agent_id: agentId,
+      agent_name: agentName,
+      agent_emoji: agentEmoji,
+      message,
+    });
+    
+    return NextResponse.json({ success: true, turn });
+  } catch (error) {
+    console.error('Failed to add message:', error);
+    return NextResponse.json({ error: 'Failed to add message' }, { status: 500 });
   }
-  
-  const turn = conversation.turns + 1;
-  
-  conversationsDb.addMessage({
-    conversation_id: conversationId,
-    turn,
-    agent_id: agentId,
-    agent_name: agentName,
-    agent_emoji: agentEmoji,
-    message,
-  });
-  
-  return NextResponse.json({ success: true, turn });
 }
 
-// POST run bot standup (generate conversation)
+// PUT start bot standup (create conversation)
 export async function PUT(request: NextRequest) {
   const { topic, participants } = await request.json();
   
   const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  // Create conversation
-  conversationsDb.create({
-    id,
-    title: `Standup: ${topic}`,
-    topic,
-    participants: JSON.stringify(participants),
-  });
   
   // Bot personas for variety
   const personas: Record<string, { emoji: string; style: string }> = {
@@ -130,6 +124,13 @@ export async function PUT(request: NextRequest) {
     ],
   };
   
+  // Create conversation
+  const conversation = await conversationsDb.create({
+    title: `Standup: ${topic}`,
+    topic,
+    participants: JSON.stringify(participants),
+  });
+  
   // Simulate conversation turns with variety
   for (let turn = 1; turn <= 5; turn++) {
     for (let i = 0; i < participants.length; i++) {
@@ -141,7 +142,7 @@ export async function PUT(request: NextRequest) {
       const messageIndex = (turn * (i + 1)) % messages.length;
       const message = messages[messageIndex];
       
-      conversationsDb.addMessage({
+      await conversationsDb.addMessage({
         conversation_id: id,
         turn,
         agent_id: participant,
@@ -179,7 +180,7 @@ export async function PUT(request: NextRequest) {
       `Review ${actionTopic} results and optimize approach`,
     ];
     
-    extractedActionsDb.create({
+    await extractedActionsDb.create({
       conversation_id: id,
       description: descriptions[Math.floor(Math.random() * descriptions.length)],
       owner: topic.owner,
@@ -189,14 +190,33 @@ export async function PUT(request: NextRequest) {
     });
   }
   
-  const conversation = conversationsDb.getById(id);
-  const messages = conversationsDb.getMessages(id);
-  const actions = extractedActionsDb.getByConversation(id);
+  const conversationUpdated = await conversationsDb.getById(id);
+  const messages = await conversationsDb.getMessages(id);
+  const actions = await extractedActionsDb.getByConversation(id);
   
   return NextResponse.json({
     success: true,
-    conversation,
+    conversation: conversationUpdated,
     messages,
     actions,
   });
+}
+
+// DELETE close or delete conversation
+export async function DELETE(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const action = searchParams.get('action') || 'close';
+  const conversationId = searchParams.get('id');
+  
+  if (!conversationId) {
+    return NextResponse.json({ error: 'Conversation ID required' }, { status: 400 });
+  }
+  
+  if (action === 'delete') {
+    await conversationsDb.delete(conversationId);
+  } else {
+    await conversationsDb.close(conversationId);
+  }
+  
+  return NextResponse.json({ success: true });
 }

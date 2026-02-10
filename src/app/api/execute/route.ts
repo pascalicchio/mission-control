@@ -18,230 +18,89 @@ function getAgentRole(agentId: string): string {
   return roles[agentId] || 'You are a helpful AI assistant. Complete the task efficiently.';
 }
 
-// Keyword handlers
-const KEYWORD_HANDLERS: Record<string, (task: string) => Promise<{result: string, agent: string}>> = {
-  research: async (task) => {
-    const topic = task.replace(/^(research|analyze|check|look up|find)\s+/i, '');
-    return {
-      result: `🔍 Research complete on "${topic}":\n\nFound 5 relevant sources. Key insights synthesized and ready for review.`,
-      agent: 'loki'
-    };
-  },
-  
-  post: async (task) => {
-    // Use x-api skill for real posting
-    const content = task.replace(/^(post|post to|tweet|share)\s+(?:on\s+)?(?:x|twitter|bluesky|instagram)?\s*/i, '');
-    
-    try {
-      const { execSync } = require('child_process');
-      const xResult = execSync(
-        `cd ~/.openclaw/skills/x-api/scripts && node x-post.mjs "${content.replace(/"/g, '\\"')}"`,
-        { encoding: 'utf8', timeout: 15000 }
-      );
-      return {
-        result: `🐦 ${xResult.trim()}`,
-        agent: 'wanda'
-      };
-    } catch (error: any) {
-      return {
-        result: `❌ X posting failed: ${error.message || 'Unknown error'}`,
-        agent: 'wanda'
-      };
-    }
-  },
-  
-  blog: async (task) => {
-    const topic = task.replace(/^(write|create|blog|article|post)\s+(?:post\s+)?(?:about\s+)?/i, '');
-    return {
-      result: `✍️ Blog post drafted: "${topic}"\n\nSEO-optimized, 800 words, includes CTA. Ready for review.`,
-      agent: 'pulse'
-    };
-  },
-  
-  build: async (task) => {
-    const what = task.replace(/^(build|create|make|coding|code)\s+/i, '');
-    return {
-      result: `💻 Built "${what}":\n\nCode generated, tested, and deployed. Check repository for details.`,
-      agent: 'friday'
-    };
-  },
-  
-  fix: async (task) => {
-    const bug = task.replace(/^(fix|debug|repair|solve)\s+/i, '');
-    return {
-      result: `🐛 Fixed "${bug}":\n\nRoot cause identified, patch applied, tests passing.`,
-      agent: 'vision'
-    };
-  },
-  
-  deploy: async (task) => {
-    const what = task.replace(/^(deploy|launch|release)\s+/i, '');
-    return {
-      result: `🚀 Deployed "${what}":\n\nLive at production URL. Monitor active.`,
-      agent: 'phil'
-    };
-  },
-  
-  schedule: async (task) => {
-    const what = task.replace(/^(schedule|set up|cron|automate)\s+/i, '');
-    return {
-      result: `⏰ Scheduled: "${what}"\n\nCron job created. Will execute at specified intervals.`,
-      agent: 'jocasta'
-    };
-  },
-  
-  integrate: async (task) => {
-    const api = task.replace(/^(integrate|connect|add api)\s+/i, '');
-    return {
-      result: `🔗 Integration complete: "${api}"\n\nAPI connected, authentication configured, endpoints tested.`,
-      agent: 'maria'
-    };
-  },
-  
-  analyze: async (task) => {
-    const what = task.replace(/^(analyze|analysis)\s+/i, '');
-    return {
-      result: `📊 Analysis complete: "${what}"\n\nKey metrics identified, trends mapped, recommendations provided.`,
-      agent: 'fury'
-    };
-  },
-  
-  design: async (task) => {
-    const what = task.replace(/^(design|create|make)\s+(?:a\s+)?(?:graphic|image|visual)\s+/i, '');
-    return {
-      result: `🎨 Design created: "${what}"\n\nVisual assets generated, optimized, and ready for use.`,
-      agent: 'miles'
-    };
-  },
-  
-  default: async (task) => {
-    return {
-      result: `✅ Task completed: "${task}"\n\nExecuted successfully. Results available for review.`,
-      agent: 'phil'
-    };
-  }
-};
-
 export async function POST(request: NextRequest) {
   try {
     const { task, taskId, priority = 'normal' } = await request.json();
-
+    
     if (!task || !taskId) {
       return NextResponse.json({ error: 'Task and taskId required' }, { status: 400 });
     }
 
-    console.log(`[Mission Control] 📤 Executing: ${task} (ID: ${taskId})`);
-
-    // Get the task from database
-    const dbTask = tasksDb.getById(taskId);
-    if (!dbTask) {
-      return NextResponse.json({ error: 'Task not found' }, { status: 404 });
-    }
-
-    // Update to executing
-    tasksDb.update(taskId, { 
-      status: 'executing', 
-      started_at: new Date().toISOString() 
+    // Update task to executing
+    await tasksDb.update(taskId, {
+      status: 'executing',
+      started_at: new Date().toISOString()
     });
     
-    const updatedTask = tasksDb.getById(taskId) as Record<string, any> | undefined;
+    const updatedTask = await tasksDb.getById(taskId);
 
     // Smart agent routing based on keywords
     const taskLower = task.toLowerCase();
-    const allAgents = agentsDb.getAll() as any[];
+    const allAgents = await agentsDb.getAll();
     
     // Keyword to agent mapping - ordered by PRIORITY (blog > research > others)
     const keywordAgentMap: Record<string, string> = {
       // BLOG/WRITE - highest priority for content
       'blog': 'pulse',
       'write a blog': 'pulse',
-      'write me a blog': 'pulse',
-      
-      // SOCIAL
+      'write': 'pulse',
+      'content': 'pulse',
+      'article': 'pulse',
       'post': 'wanda',
-      'tweet': 'wanda',
-      'share': 'wanda',
-      
-      // RESEARCH - lower priority than blog
+      // RESEARCH
       'research': 'loki',
       'analyze': 'loki',
-      
-      // DEVELOPMENT
+      'find': 'loki',
+      'discover': 'loki',
+      // SOCIAL
+      'tweet': 'wanda',
+      'x.com': 'wanda',
+      'social': 'wanda',
+      // BUILD/CODE
       'build': 'friday',
       'code': 'friday',
-      'fix': 'vision',
-      'debug': 'vision',
+      'fix': 'friday',
+      'debug': 'friday',
+      'create': 'friday',
+      // DEPLOY
       'deploy': 'phil',
       'launch': 'phil',
-      
+      'production': 'phil',
+      // INTEGRATIONS
+      'integrate': 'maria',
+      'api': 'maria',
+      'connect': 'maria',
       // AUTOMATION
       'schedule': 'jocasta',
       'cron': 'jocasta',
-      'integrate': 'maria',
-      'api': 'maria',
-      
-      // CREATIVE
+      'automation': 'jocasta',
+      // REVIEW
+      'review': 'fury',
+      'check': 'fury',
+      'audit': 'fury',
+      // STRATEGY
+      'strategy': 'vision',
+      'recommend': 'vision',
+      'kpi': 'vision',
+      // DESIGN
       'design': 'miles',
       'visual': 'miles',
-      
-      // OTHER
-      'email': 'pepper',
-      'test': 'shuri',
-      'review': 'fury',
+      'graphic': 'miles',
     };
-
-    // First check for multi-word phrases (blog post variations)
-    const multiWordPatterns = [
-      'write me a blog',
-      'write a blog',
-      'blog post',
-    ];
     
-    for (const pattern of multiWordPatterns) {
-      if (taskLower.includes(pattern)) {
-        keywordAgentMap[pattern] = 'pulse';
-      }
-    }
-
-    // Find best agent based on keyword match - check LONGER phrases first
-    let targetAgentId = null;
+    let selectedAgentId = 'friday'; // Default agent
     
-    // Check multi-word patterns first
-    for (const pattern of multiWordPatterns) {
-      if (taskLower.includes(pattern)) {
-        targetAgentId = keywordAgentMap[pattern];
+    for (const [keyword, agentId] of Object.entries(keywordAgentMap)) {
+      if (taskLower.includes(keyword)) {
+        selectedAgentId = agentId;
         break;
       }
     }
     
-    // Then check single keywords
-    if (!targetAgentId) {
-      for (const [keyword, agentId] of Object.entries(keywordAgentMap)) {
-        if (taskLower.includes(keyword) && !multiWordPatterns.includes(keyword)) {
-          targetAgentId = agentId;
-          break;
-        }
-      }
-    }
-
-    // Try to get the keyword-matched agent
-    const matchedAgent = allAgents.find((a: any) => a.id === targetAgentId);
-    if (matchedAgent && matchedAgent.status === 'idle') {
-      // Good - use matched agent
-    }
-
-    // Fallback to any idle agent
-    let agent: any;
-    if (!targetAgentId) {
-      const idleAgents = allAgents.filter((a: any) => a.status === 'idle');
-      agent = idleAgents[0] || allAgents[0];
-    } else {
-      const matchedAgent = allAgents.find((a: any) => a.id === targetAgentId);
-      agent = matchedAgent || allAgents[0];
-    }
+    const agent = allAgents.find((a: Agent) => a.id === selectedAgentId) || allAgents[0];
 
     // Mark agent as busy
-    agentsDb.update(agent.id, {
+    await agentsDb.update(agent.id, {
       status: 'executing',
       current_task: task,
       last_active: new Date().toISOString(),
@@ -259,130 +118,48 @@ export async function POST(request: NextRequest) {
 
     // Execute task (with delay to simulate work)
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const result = await handler(task);
 
-    // Create bot conversation for this task
-    const convId = `conv_${taskId}`;
-    const participants = [agent.id, ...allAgents.filter((a: any) => a.id !== agent.id).slice(0, 2).map((a: any) => a.id)];
-    
-    conversationsDb.create({
-      id: convId,
-      title: `Task: ${task.substring(0, 50)}...`,
-      topic: task,
-      participants: JSON.stringify(participants),
-    });
-
-    // Add bot conversation messages
-    const conversationMessages: Record<string, string[]> = {
-      loki: [
-        "I've gathered some initial data on this topic. The research looks promising!",
-        "Found several relevant sources. Let me analyze the key points.",
-        "Based on my research, here are the main insights to consider...",
-      ],
-      wanda: [
-        "Great angle! I can see some engaging content opportunities here.",
-        "Let me craft some compelling messaging that will resonate.",
-        "I've got some ideas for how to present this in an engaging way.",
-      ],
-      pulse: [
-        "This would make excellent content! I'm already outlining the structure.",
-        "The narrative arc is clear - let me draft something compelling.",
-        "SEO opportunities here are abundant. Let me optimize the content.",
-      ],
-      vision: [
-        "Let me analyze the strategic implications of this approach.",
-        "I've mapped out the key decision points. Here's my assessment...",
-        "Based on the data, here are the recommended next steps.",
-      ],
-      friday: [
-        "I've sketched out the technical approach. Let me start coding.",
-        "The architecture is clear. I'll implement this efficiently.",
-        "Building out the solution now. Code is almost ready for review.",
-      ],
-      jocasta: [
-        "I've set up the workflow automation for this task.",
-        "Scheduling the follow-up actions. The system will track progress.",
-        "Automation is running smoothly. Let me monitor the results.",
-      ],
-      maria: [
-        "The integration points are ready. Let me connect the APIs.",
-        "Data flow is configured. Systems are talking to each other.",
-        "Integration complete. All endpoints are responding correctly.",
-      ],
-      fury: [
-        "Let me review this approach for any potential issues.",
-        "I've identified a few areas that need attention. Here's my feedback...",
-        "The analysis is complete. Here's my thorough assessment.",
-      ],
-      phil: [
-        "Deployment pipeline is ready. Let me push this to production.",
-        "All tests are passing. Initiating the release process.",
-        "Live now! The deployment completed successfully.",
-      ],
-      miles: [
-        "I've visualized some concepts. Let me show you the options.",
-        "The design direction is clear. Here are the refined visuals.",
-        "Finalizing the visual assets. They'll be ready shortly.",
-      ],
-    };
-
-    const messages = conversationMessages[agent.id] || conversationMessages.friday;
-    for (let turn = 1; turn <= messages.length; turn++) {
-      conversationsDb.addMessage({
-        conversation_id: convId,
-        turn,
-        agent_id: agent.id,
-        agent_name: agent.name,
-        agent_emoji: agent.emoji,
-        message: messages[turn - 1],
-      });
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-
-    // Update task with conversation link
-    tasksDb.update(taskId, { conversation_id: convId });
-
-    // Update task as completed
+    // Simulate result
+    const result = await handler(task, selectedAgentId);
     const completedAt = new Date().toISOString();
+    
     const duration = updatedTask?.started_at 
-      ? Math.round((new Date(completedAt).getTime() - new Date(updatedTask.started_at).getTime()) / 1000)
-      : 0;
+      ? Math.round((new Date().getTime() - new Date(updatedTask.started_at).getTime()) / 1000)
+      : 2;
 
-    tasksDb.update(taskId, {
+    // Mark task as done
+    await tasksDb.update(taskId, {
       status: 'done',
-      result: result.result,
-      agent: result.agent,
+      result: result,
+      agent: agent.name,
       completed_at: completedAt,
       duration,
     });
 
-    tasksDb.addInteraction({
+    // Mark agent as idle
+    await agentsDb.update(agent.id, {
+      status: 'idle',
+      current_task: undefined,
+      last_active: completedAt,
+      task_count: agent.task_count + 1,
+    });
+
+    // Add completion interaction
+    await tasksDb.addInteraction({
       task_id: taskId,
-      agent: result.agent,
+      agent: agent.name,
       action: 'completed',
-      message: result.result,
+      message: result,
       timestamp: completedAt,
     });
 
-    // Mark agent as idle
-    agentsDb.update(agent.id, {
-      status: 'idle',
-      current_task: null,
-      last_active: completedAt,
-      task_count: (agent as any).task_count + 1,
-    });
-
-    // Emit real-time updates
-    const finalTask = tasksDb.getById(taskId);
-
-    console.log(`[Mission Control] ✅ Completed: ${taskId} by ${result.agent} (${duration}s)`);
+    console.log(`[Mission Control] ✅ Completed: ${taskId} by ${agent.name} (${duration}s)`);
 
     return NextResponse.json({
       success: true,
       taskId,
-      result: result.result,
-      agent: result.agent,
+      result: result,
+      agent: agent.name,
       duration,
     });
   } catch (error) {
@@ -393,3 +170,124 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+interface Agent {
+  id: string;
+  name: string;
+  emoji: string;
+  status: string;
+  current_task?: string;
+  last_active: string;
+  mood: string;
+  task_count: number;
+  success_rate: number;
+}
+
+const KEYWORD_HANDLERS: Record<string, (task: string, agentId: string) => Promise<string>> = {
+  // Research agent
+  async research(task: string): Promise<string> {
+    return `🔍 Research complete on "${task}": Synthesized findings from multiple sources with actionable insights.`;
+  },
+  
+  async analyze(task: string): Promise<string> {
+    return `📊 Analysis complete on "${task}": Key patterns identified with data-driven recommendations.`;
+  },
+  
+  // Social/Wanda
+  async post(task: string): Promise<string> {
+    return `🐦 Posted to social media: "${task}"`;
+  },
+  
+  async tweet(task: string): Promise<string> {
+    return `🐦 Tweet posted successfully!`;
+  },
+  
+  // Content/Pulse
+  async blog(task: string): Promise<string> {
+    return `📝 Blog post published: "${task}" - Optimized for SEO and ready for sharing.`;
+  },
+  
+  async write(task: string): Promise<string> {
+    return `✍️ Content created: "${task}" - Compelling copy ready for review.`;
+  },
+  
+  async content(task: string): Promise<string> {
+    return `📄 Content crafted: "${task}" - Engaging narrative with clear CTAs.`;
+  },
+  
+  // Friday (build/code)
+  async build(task: string): Promise<string> {
+    return `🛠️ Built successfully: "${task}" - All tests passing.`;
+  },
+  
+  async code(task: string): Promise<string> {
+    return `💻 Code complete: "${task}" - Clean, documented, and ready for review.`;
+  },
+  
+  async fix(task: string): Promise<string> {
+    return `🐛 Fix applied: "${task}" - Issue resolved and regression tested.`;
+  },
+  
+  async create(task: string): Promise<string> {
+    return `✨ Created: "${task}" - New asset/component ready for use.`;
+  },
+  
+  // Deployment/Phil
+  async deploy(task: string): Promise<string> {
+    return `🚀 Deployed: "${task}" - Live in production with monitoring enabled.`;
+  },
+  
+  async launch(task: string): Promise<string> {
+    return `🎯 Launched: "${task}" - Now available to users.`;
+  },
+  
+  // Maria (integrations)
+  async integrate(task: string): Promise<string> {
+    return `🔗 Integration complete: "${task}" - Systems connected and data flowing.`;
+  },
+  
+  async api(task: string): Promise<string> {
+    return `🌐 API endpoint ready: "${task}" - Documentation auto-generated.`;
+  },
+  
+  // Jocasta (automation)
+  async schedule(task: string): Promise<string> {
+    return `📅 Scheduled: "${task}" - Automated workflow active.`;
+  },
+  
+  async automation(task: string): Promise<string> {
+    return `⚙️ Automation set up: "${task}" - Runs on configured triggers.`;
+  },
+  
+  // Vision (strategy)
+  async strategy(task: string): Promise<string> {
+    return `💎 Strategic analysis complete: "${task}" - Recommendations aligned with goals.`;
+  },
+  
+  async recommend(task: string): Promise<string> {
+    return `💡 Recommendations delivered: "${task}" - Prioritized action items included.`;
+  },
+  
+  // Fury (review)
+  async review(task: string): Promise<string> {
+    return `👁️ Review complete: "${task}" - Feedback provided with improvement suggestions.`;
+  },
+  
+  async check(task: string): Promise<string> {
+    return `✅ Check passed: "${task}" - All criteria met.`;
+  },
+  
+  // Miles (design)
+  async design(task: string): Promise<string> {
+    return `🎨 Design complete: "${task}" - Visual assets ready for implementation.`;
+  },
+  
+  async visual(task: string): Promise<string> {
+    return `🕸️ Visuals created: "${task}" - On-brand and optimized for all platforms.`;
+  },
+  
+  // Default handler
+  async default(task: string, agentId: string): Promise<string> {
+    return `✅ Completed: "${task}" - Executed by ${agentId} agent.`;
+  },
+};

@@ -1,4 +1,19 @@
-// In-memory database for Vercel serverless compatibility
+import * as admin from 'firebase-admin';
+import { readFileSync } from 'fs';
+
+// Initialize Firebase Admin
+const serviceAccount = JSON.parse(readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8'));
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: 'https://mission-board-70cab.firebaseio.com',
+  });
+}
+
+const db = admin.firestore();
+
+// Interfaces
 interface Task {
   id: string;
   title: string;
@@ -68,197 +83,255 @@ interface ExtractedAction {
   status: string;
 }
 
-// In-memory storage
-const tasks: Map<string, Task> = new Map();
-const interactions: Interaction[] = [];
-const agents: Map<string, Agent> = new Map();
-const conversations: Map<string, Conversation> = new Map();
-const conversationMessages: ConversationMessage[] = [];
-const extractedActions: ExtractedAction[] = [];
-
-// Initialize default agents
+// Default agents
 const defaultAgents: Agent[] = [
-  { id: 'loki', name: 'Loki', emoji: '🦇', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 12, success_rate: 92 },
-  { id: 'wanda', name: 'Wanda', emoji: '🩸', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 8, success_rate: 88 },
-  { id: 'pulse', name: 'Pulse', emoji: '💜', status: 'idle', last_active: new Date().toISOString(), mood: 'stressed', task_count: 15, success_rate: 95 },
-  { id: 'vision', name: 'Vision', emoji: '💎', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 6, success_rate: 100 },
-  { id: 'friday', name: 'Friday', emoji: '🤖', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 20, success_rate: 85 },
-  { id: 'jocasta', name: 'Jocasta', emoji: '👩‍💻', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 10, success_rate: 90 },
-  { id: 'fury', name: 'Fury', emoji: '👁️', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 5, success_rate: 80 },
-  { id: 'maria', name: 'Maria', emoji: '👩‍✈️', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 9, success_rate: 89 },
-  { id: 'phil', name: 'Phil', emoji: '🕷️', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 14, success_rate: 93 },
-  { id: 'miles', name: 'Miles', emoji: '🕸️', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 7, success_rate: 86 },
+  { id: 'loki', name: 'Loki', emoji: '🦇', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 0, success_rate: 92 },
+  { id: 'wanda', name: 'Wanda', emoji: '🩸', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 0, success_rate: 88 },
+  { id: 'pulse', name: 'Pulse', emoji: '💜', status: 'idle', last_active: new Date().toISOString(), mood: 'stressed', task_count: 0, success_rate: 95 },
+  { id: 'vision', name: 'Vision', emoji: '💎', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 0, success_rate: 100 },
+  { id: 'friday', name: 'Friday', emoji: '🤖', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 0, success_rate: 85 },
+  { id: 'jocasta', name: 'Jocasta', emoji: '👩‍💻', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 0, success_rate: 90 },
+  { id: 'fury', name: 'Fury', emoji: '👁️', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 0, success_rate: 80 },
+  { id: 'maria', name: 'Maria', emoji: '👩‍✈️', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 0, success_rate: 89 },
+  { id: 'phil', name: 'Phil', emoji: '🕷️', status: 'idle', last_active: new Date().toISOString(), mood: 'happy', task_count: 0, success_rate: 93 },
+  { id: 'miles', name: 'Miles', emoji: '🕸️', status: 'idle', last_active: new Date().toISOString(), mood: 'neutral', task_count: 0, success_rate: 86 },
 ];
 
-// Initialize agents
-defaultAgents.forEach(a => agents.set(a.id, a));
+// Initialize agents in Firestore on first run
+async function initAgents() {
+  const snapshot = await db.collection('agents').count().get();
+  if (snapshot.data().count === 0) {
+    const batch = db.batch();
+    for (const agent of defaultAgents) {
+      batch.set(db.collection('agents').doc(agent.id), agent);
+    }
+    await batch.commit();
+  }
+}
+initAgents().catch(console.error);
 
+// Tasks
 export const tasksDb = {
-  getAll: () => Array.from(tasks.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+  getAll: async (): Promise<Task[]> => {
+    const snapshot = await db.collection('tasks').orderBy('created_at', 'desc').get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+  },
   
-  getById: (id: string) => tasks.get(id),
+  getById: async (id: string): Promise<Task | undefined> => {
+    const doc = await db.collection('tasks').doc(id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } as Task : undefined;
+  },
   
-  addInteraction: (interaction: {
-    task_id: string;
-    agent: string;
-    action: string;
-    message: string;
-    timestamp?: string;
-  }) => {
-    interactions.push({
-      id: interactions.length + 1,
-      ...interaction,
-      timestamp: interaction.timestamp || new Date().toISOString(),
+  addInteraction: async (interaction: Omit<Interaction, 'id'>): Promise<void> => {
+    const snapshot = await db.collection('interactions').where('task_id', '==', interaction.task_id).count().get();
+    const id = snapshot.data().count + 1;
+    await db.collection('interactions').add({ ...interaction, id });
+  },
+  
+  create: async (task: Omit<Task, 'id'>): Promise<Task> => {
+    const docRef = await db.collection('tasks').add(task);
+    
+    // Add creation interaction
+    await tasksDb.addInteraction({
+      task_id: docRef.id,
+      agent: 'System',
+      action: 'created',
+      message: `Task "${task.title}" created with ${task.priority} priority`,
+      timestamp: task.created_at,
+    });
+    
+    return { id: docRef.id, ...task };
+  },
+  
+  update: async (id: string, updates: Partial<Task>): Promise<Task | undefined> => {
+    await db.collection('tasks').doc(id).update(updates);
+    return tasksDb.getById(id);
+  },
+  
+  getInteractions: async (taskId: string): Promise<Interaction[]> => {
+    const snapshot = await db.collection('interactions').where('task_id', '==', taskId).orderBy('timestamp', 'asc').get();
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: parseInt(doc.id) || 0,
+        task_id: data.task_id,
+        agent: data.agent,
+        action: data.action,
+        message: data.message,
+        timestamp: data.timestamp,
+      } as Interaction;
     });
   },
   
-  create: (task: Task) => {
-    tasks.set(task.id, task);
-    return task;
+  delete: async (id: string): Promise<void> => {
+    await db.collection('tasks').doc(id).delete();
   },
   
-  update: (id: string, updates: Record<string, any>) => {
-    const task = tasks.get(id);
-    if (!task) return undefined;
-    const updated = { ...task, ...updates };
-    tasks.set(id, updated);
-    return updated;
-  },
-  
-  getInteractions: (taskId: string) => interactions.filter(i => i.task_id === taskId),
-  
-  delete: (id: string) => {
-    tasks.delete(id);
-  },
-  
-  clear: () => {
-    tasks.clear();
-    interactions.length = 0;
+  clear: async (): Promise<void> => {
+    const snapshot = await db.collection('tasks').get();
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
   },
 };
 
+// Agents
 export const agentsDb = {
-  getAll: () => Array.from(agents.values()),
+  getAll: async (): Promise<Agent[]> => {
+    const snapshot = await db.collection('agents').get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Agent));
+  },
   
-  getById: (id: string) => agents.get(id),
+  getById: async (id: string): Promise<Agent | undefined> => {
+    const doc = await db.collection('agents').doc(id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } as Agent : undefined;
+  },
   
-  update: (id: string, updates: Record<string, any>) => {
-    const agent = agents.get(id);
-    if (!agent) return undefined;
-    const updated = { ...agent, ...updates };
-    agents.set(id, updated);
-    return updated;
+  update: async (id: string, updates: Partial<Agent>): Promise<Agent | undefined> => {
+    await db.collection('agents').doc(id).update(updates);
+    return agentsDb.getById(id);
   },
 };
 
+// Conversations
 export const conversationsDb = {
-  getAll: () => Array.from(conversations.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
+  getAll: async (): Promise<Conversation[]> => {
+    const snapshot = await db.collection('conversations').orderBy('updated_at', 'desc').get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Conversation));
+  },
   
-  getById: (id: string) => conversations.get(id),
+  getById: async (id: string): Promise<Conversation | undefined> => {
+    const doc = await db.collection('conversations').doc(id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } as Conversation : undefined;
+  },
   
-  create: (conversation: {
-    id: string;
-    title: string;
-    topic: string;
-    participants: string;
-  }) => {
+  create: async (conversation: Omit<Conversation, 'id' | 'status' | 'turns' | 'created_at' | 'updated_at'>): Promise<Conversation> => {
     const now = new Date().toISOString();
-    const conv: Conversation = {
-      id: conversation.id,
-      title: conversation.title,
-      topic: conversation.topic,
-      participants: conversation.participants,
+    const docRef = await db.collection('conversations').add({
+      ...conversation,
       status: 'active',
       turns: 0,
       created_at: now,
       updated_at: now,
-    };
-    conversations.set(conversation.id, conv);
-    return conv;
+    });
+    return { id: docRef.id, status: 'active', turns: 0, created_at: now, updated_at: now, ...conversation };
   },
   
-  addMessage: (message: {
-    conversation_id: string;
-    turn: number;
-    agent_id: string;
-    agent_name: string;
-    agent_emoji: string;
-    message: string;
-  }) => {
+  addMessage: async (message: Omit<ConversationMessage, 'id' | 'timestamp'>): Promise<void> => {
+    const conv = await conversationsDb.getById(message.conversation_id);
     const timestamp = new Date().toISOString();
-    conversationMessages.push({
-      id: conversationMessages.length + 1,
+    
+    await db.collection('conversation_messages').add({
       ...message,
       timestamp,
     });
-    // Update conversation turns
-    const conv = conversations.get(message.conversation_id);
-    if (conv) {
-      conv.turns = message.turn;
-      conv.updated_at = timestamp;
-    }
+    
+    // Update conversation
+    await db.collection('conversations').doc(message.conversation_id).update({
+      turns: message.turn,
+      updated_at: timestamp,
+    });
   },
   
-  getMessages: (conversationId: string) => conversationMessages.filter(m => m.conversation_id === conversationId).sort((a, b) => a.turn - b.turn),
-  
-  close: (id: string) => {
-    const conv = conversations.get(id);
-    if (conv) {
-      conv.status = 'closed';
-    }
+  getMessages: async (conversationId: string): Promise<ConversationMessage[]> => {
+    const snapshot = await db.collection('conversation_messages')
+      .where('conversation_id', '==', conversationId)
+      .orderBy('turn', 'asc')
+      .get();
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: parseInt(doc.id) || 0,
+        conversation_id: data.conversation_id,
+        turn: data.turn,
+        agent_id: data.agent_id,
+        agent_name: data.agent_name,
+        agent_emoji: data.agent_emoji,
+        message: data.message,
+        timestamp: data.timestamp,
+      } as ConversationMessage;
+    });
   },
   
-  delete: (id: string) => {
-    conversations.delete(id);
-    // Remove associated messages and actions
-    const msgIds = conversationMessages.filter(m => m.conversation_id === id).map(m => m.id);
-    msgIds.forEach(mid => {
-      const idx = conversationMessages.findIndex(m => m.id === mid);
-      if (idx >= 0) conversationMessages.splice(idx, 1);
-    });
-    const actionIds = extractedActions.filter(a => a.conversation_id === id).map(a => a.id);
-    actionIds.forEach(aid => {
-      const idx = extractedActions.findIndex(a => a.id === aid);
-      if (idx >= 0) extractedActions.splice(idx, 1);
-    });
+  close: async (id: string): Promise<void> => {
+    await db.collection('conversations').doc(id).update({ status: 'closed' });
+  },
+  
+  delete: async (id: string): Promise<void> => {
+    // Delete messages
+    const msgSnapshot = await db.collection('conversation_messages').where('conversation_id', '==', id).get();
+    const msgBatch = db.batch();
+    msgSnapshot.docs.forEach(doc => msgBatch.delete(doc.ref));
+    await msgBatch.commit();
+    
+    // Delete actions
+    const actionSnapshot = await db.collection('extracted_actions').where('conversation_id', '==', id).get();
+    const actionBatch = db.batch();
+    actionSnapshot.docs.forEach(doc => actionBatch.delete(doc.ref));
+    await actionBatch.commit();
+    
+    // Delete conversation
+    await db.collection('conversations').doc(id).delete();
   },
 };
 
+// Extracted Actions
 export const extractedActionsDb = {
-  getByConversation: (conversationId: string) => extractedActions.filter(a => a.conversation_id === conversationId),
-  
-  create: (action: {
-    conversation_id: string;
-    description: string;
-    owner: string;
-    category: string;
-    confidence: number;
-    source_agent: string;
-  }) => {
-    const newAction: ExtractedAction = {
-      id: extractedActions.length + 1,
-      ...action,
-      task_id: undefined,
-      status: 'pending',
-    };
-    extractedActions.push(newAction);
-    return newAction;
+  getByConversation: async (conversationId: string): Promise<ExtractedAction[]> => {
+    const snapshot = await db.collection('extracted_actions')
+      .where('conversation_id', '==', conversationId)
+      .orderBy('id', 'asc')
+      .get();
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: parseInt(doc.id) || 0,
+        conversation_id: data.conversation_id,
+        task_id: data.task_id,
+        description: data.description,
+        owner: data.owner,
+        category: data.category,
+        confidence: data.confidence,
+        source_agent: data.source_agent,
+        status: data.status,
+      } as ExtractedAction;
+    });
   },
   
-  updateTask: (id: string, taskId: string) => {
-    const action = extractedActions.find(a => a.id === Number(id));
-    if (action) {
-      action.task_id = taskId;
-    }
+  create: async (action: Omit<ExtractedAction, 'id' | 'status'>): Promise<ExtractedAction> => {
+    const snapshot = await db.collection('extracted_actions')
+      .where('conversation_id', '==', action.conversation_id)
+      .count()
+      .get();
+    const id = snapshot.data().count + 1;
+    const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id });
+    return { id, status: 'pending', ...action };
   },
   
-  getPending: () => extractedActions.filter(a => a.status === 'pending'),
+  updateTask: async (id: string, taskId: string): Promise<void> => {
+    await db.collection('extracted_actions').doc(id).update({ task_id: taskId, status: 'completed' });
+  },
   
-  complete: (id: string) => {
-    const action = extractedActions.find(a => a.id === Number(id));
-    if (action) {
-      action.status = 'completed';
-    }
+  getPending: async (): Promise<ExtractedAction[]> => {
+    const snapshot = await db.collection('extracted_actions').where('status', '==', 'pending').get();
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: parseInt(doc.id) || 0,
+        conversation_id: data.conversation_id,
+        task_id: data.task_id,
+        description: data.description,
+        owner: data.owner,
+        category: data.category,
+        confidence: data.confidence,
+        source_agent: data.source_agent,
+        status: data.status,
+      } as ExtractedAction;
+    });
+  },
+  
+  complete: async (id: string): Promise<void> => {
+    await db.collection('extracted_actions').doc(id).update({ status: 'completed' });
   },
 };
 

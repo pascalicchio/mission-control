@@ -3,8 +3,7 @@ import { tasksDb, agentsDb } from '@/lib/db';
 
 export async function GET() {
   try {
-    const tasks = tasksDb.getAll();
-    const agents = agentsDb.getAll();
+    const [tasks, agents] = await Promise.all([tasksDb.getAll(), agentsDb.getAll()]);
     return NextResponse.json({ tasks, agents });
   } catch (error) {
     console.error('Failed to fetch data:', error);
@@ -20,10 +19,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Title required' }, { status: 400 });
     }
 
-    const taskId = Date.now().toString();
-    
-    const task = tasksDb.create({
-      id: taskId,
+    const task = await tasksDb.create({
       title,
       status: 'pending',
       priority,
@@ -31,29 +27,29 @@ export async function POST(request: NextRequest) {
     });
 
     // Find an available agent
-    const allAgents = agentsDb.getAll() as any[];
-    const idleAgents = allAgents.filter((a: any) => a.status === 'idle');
+    const allAgents = await agentsDb.getAll();
+    const idleAgents = allAgents.filter(a => a.status === 'idle');
     const agent = idleAgents[0] || allAgents[0];
 
     // Mark agent as busy
-    agentsDb.update(agent.id, { 
+    await agentsDb.update(agent.id, { 
       status: 'executing', 
-      current_task: title,
+      current_task: task.title,
       last_active: new Date().toISOString(),
     });
     
     // Update task status to executing
     const startedAt = new Date().toISOString();
-    tasksDb.update(taskId, { status: 'executing', agent: agent.name, started_at: startedAt });
+    const updatedTask = await tasksDb.update(task.id, { status: 'executing', agent: agent.name, started_at: startedAt });
 
-    // Trigger execution
+    // Trigger execution (fire and forget)
     fetch('/api/execute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task: title, taskId, priority }),
+      body: JSON.stringify({ task: task.title, taskId: task.id, priority }),
     }).catch(err => console.error('Execution trigger failed:', err));
 
-    return NextResponse.json({ success: true, task: { ...task, status: 'executing', agent: agent.name } });
+    return NextResponse.json({ success: true, task: updatedTask });
   } catch (error) {
     console.error('Failed to create task:', error);
     return NextResponse.json({ error: 'Failed to create task' }, { status: 500 });
@@ -68,7 +64,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Task ID required' }, { status: 400 });
     }
 
-    const task = tasksDb.getById(id);
+    const task = await tasksDb.getById(id);
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
@@ -84,7 +80,7 @@ export async function PATCH(request: NextRequest) {
       
       if (status === 'done' || status === 'failed') {
         updates.completed_at = new Date().toISOString();
-        const startedAt = (tasksDb.getById(id) as Record<string, any> | undefined)?.started_at;
+        const startedAt = task.started_at;
         if (startedAt) {
           updates.duration = Math.round(
             (new Date().getTime() - new Date(startedAt).getTime()) / 1000
@@ -93,12 +89,12 @@ export async function PATCH(request: NextRequest) {
         
         // Mark agent as idle
         if (agent) {
-          const agentData = agentsDb.getById(agent.toLowerCase());
+          const agentData = await agentsDb.getById(agent.toLowerCase());
           if (agentData) {
-            const newTaskCount = (agentData as any).task_count + 1;
-            agentsDb.update((agent as any).toLowerCase(), {
+            const newTaskCount = agentData.task_count + 1;
+            await agentsDb.update(agent.toLowerCase(), {
               status: 'idle',
-              current_task: null,
+              current_task: undefined,
               last_active: new Date().toISOString(),
               task_count: newTaskCount,
             });
@@ -110,10 +106,10 @@ export async function PATCH(request: NextRequest) {
     if (result) updates.result = result;
     if (agent) updates.agent = agent;
 
-    const updatedTask = tasksDb.update(id, updates);
+    const updatedTask = await tasksDb.update(id, updates);
 
     // Add interaction
-    tasksDb.addInteraction({
+    await tasksDb.addInteraction({
       task_id: id,
       agent: agent || 'System',
       action: status || 'updated',
@@ -133,12 +129,9 @@ export async function DELETE(request: NextRequest) {
   const id = searchParams.get('id');
 
   if (id) {
-    const task = tasksDb.getById(id);
-    if (task) {
-      tasksDb.delete(id);
-    }
+    await tasksDb.delete(id);
   } else {
-    tasksDb.clear();
+    await tasksDb.clear();
   }
 
   return NextResponse.json({ success: true });
