@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   
   // Get all pending actions and find by ID
   const pendingActions = await extractedActionsDb.getPending();
-  const action = pendingActions.find((a: any) => a.id === Number(actionId));
+  const action = pendingActions.find((a: any) => a.id === actionId);
   
   if (!action) {
     return NextResponse.json({ error: 'Action not found' }, { status: 404 });

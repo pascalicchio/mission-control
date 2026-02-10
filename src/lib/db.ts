@@ -114,7 +114,7 @@ interface ConversationMessage {
 }
 
 interface ExtractedAction {
-  id: number;
+  id: string;
   conversation_id: string;
   task_id?: string;
   description: string;
@@ -441,7 +441,7 @@ export const extractedActionsDb = {
     const actions = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
-        id: parseInt(doc.id) || 0,
+        id: doc.id, // Firestore doc ID is a string
         conversation_id: data.conversation_id,
         task_id: data.task_id,
         description: data.description,
@@ -452,8 +452,8 @@ export const extractedActionsDb = {
         status: data.status,
       } as ExtractedAction;
     });
-    // Sort by id in memory
-    return actions.sort((a, b) => a.id - b.id);
+    // Firestore returns in creation order, no need to sort by id
+    return actions;
   },
   
   create: async (action: Omit<ExtractedAction, 'id' | 'status'>): Promise<ExtractedAction> => {
@@ -492,7 +492,7 @@ export const extractedActionsDb = {
     return snapshot.docs.map(doc => {
       const data = doc.data();
       return {
-        id: parseInt(doc.id) || 0,
+        id: doc.id, // Firestore doc ID is a string
         conversation_id: data.conversation_id,
         task_id: data.task_id,
         description: data.description,
