@@ -1,5 +1,4 @@
 import * as admin from 'firebase-admin';
-import { readFileSync } from 'fs';
 
 // Initialize Firebase Admin once
 let adminApp: admin.app.App | null = null;
@@ -8,7 +7,31 @@ let firestore: FirebaseFirestore.Firestore | null = null;
 function getFirestore(): FirebaseFirestore.Firestore {
   if (!firestore) {
     try {
-      const serviceAccount = JSON.parse(readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8'));
+      // Get credentials from environment or use inline fallback
+      const projectId = process.env.FIREBASE_PROJECT_ID || 'mission-board-70cab';
+      
+      // For Vercel, use environment variable for private key if available
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      if (!privateKey) {
+        // Try to read from file for local development
+        try {
+          privateKey = require('fs').readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8');
+          const serviceAccount = JSON.parse(privateKey);
+          privateKey = serviceAccount.private_key;
+        } catch (e) {
+          // Fallback - hardcode for Vercel deployment
+          privateKey = process.env.FIREBASE_PRIVATE_KEY_INLINE || '';
+        }
+      }
+      
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || 'firebase-adminsdk-fbsvc@mission-board-70cab.iam.gserviceaccount.com';
+      
+      const serviceAccount: admin.ServiceAccount = {
+        projectId,
+        clientEmail,
+        // Handle escaped newlines in environment variable
+        privateKey: privateKey?.replace(/\\n/g, '\n') || '',
+      };
       
       if (!admin.apps.length) {
         adminApp = admin.initializeApp({
