@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { io, Socket } from 'socket.io-client';
 import { playSound } from '@/lib/sounds';
 
 // Types
@@ -85,9 +84,6 @@ export default function Dashboard() {
   const [priority, setPriority] = useState<'normal' | 'rush'>('normal');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'executing' | 'done'>('all');
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [socketConnected, setSocketConnected] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -104,17 +100,10 @@ export default function Dashboard() {
     } else {
       setAuthenticated(true);
       loadData();
-      initSocket();
+      // Polling disabled for stability - use manual refresh or start actions
     }
     setLoading(false);
-
-    return () => {
-      // Cleanup polling interval
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-    };
-  }, [router, pollingInterval]);
+  }, [router]);
 
   const loadData = async () => {
     try {
@@ -245,29 +234,6 @@ export default function Dashboard() {
     }
   };
 
-  const initSocket = useCallback(() => {
-    // Socket.IO doesn't work on Vercel's serverless environment
-    // Use polling fallback instead
-    setSocketConnected(true);
-    
-    const poll = setInterval(async () => {
-      try {
-        const res = await fetch('/api/tasks');
-        const data = await res.json();
-        if (data.tasks) {
-          setTasks(data.tasks);
-        }
-        if (data.agents) {
-          setAgents(data.agents);
-        }
-      } catch (error) {
-        // Silently fail - polling is best effort
-      }
-    }, 5000); // Poll every 5 seconds
-    
-    setPollingInterval(poll);
-  }, []);
-
   const handleLogout = () => {
     document.cookie = 'mission_token=; path=/; max-age=0';
     router.push('/login');
@@ -383,12 +349,6 @@ export default function Dashboard() {
           </div>
           
           <div className="flex items-center gap-4">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${socketConnected ? 'bg-green-500/10 border border-green-500/20' : 'bg-yellow-500/10 border border-yellow-500/20'}`}>
-              <span className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`}></span>
-              <span className={`text-xs ${socketConnected ? 'text-green-400' : 'text-yellow-400'}`}>
-                {socketConnected ? 'Live Updates' : 'Polling...'}
-              </span>
-            </div>
             <button onClick={handleLogout} className="glass-button text-sm">
               🚪 Logout
             </button>
