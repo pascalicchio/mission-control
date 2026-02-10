@@ -6,14 +6,14 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const task = tasksDb.getById(params.id);
+    const task = await tasksDb.getById(params.id);
     
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
 
     // Get interactions for this task
-    const interactions = tasksDb.getInteractions(params.id);
+    const interactions = await tasksDb.getInteractions(params.id);
 
     return NextResponse.json({
       task: {
