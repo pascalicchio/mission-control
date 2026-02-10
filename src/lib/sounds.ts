@@ -13,9 +13,7 @@ export const playSound = (type: 'complete' | 'success' | 'error' | 'notification
       osc1.frequency.setValueAtTime(783.99, ctx.currentTime + 0.2); // G5
       osc1.type = 'sine';
       gain1.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain1.gain.exponentialDecayTo = 0.01;
-      gain1.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain1.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
       osc1.start(ctx.currentTime);
       osc1.stop(ctx.currentTime + 0.3);
     },
