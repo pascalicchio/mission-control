@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tasksDb, agentsDb } from '@/lib/db';
-import { emitTaskUpdate, emitAgentUpdate, emitActivity } from '@/lib/socket';
 
 export async function GET() {
   try {
@@ -31,15 +30,6 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     });
 
-    // Emit real-time update
-    emitTaskUpdate('task:created', task);
-    emitActivity({
-      id: Date.now().toString(),
-      type: 'task_created',
-      message: `New task: "${title}"`,
-      timestamp: task.created_at,
-    });
-
     // Find an available agent
     const allAgents = agentsDb.getAll() as any[];
     const idleAgents = allAgents.filter((a: any) => a.status === 'idle');
@@ -55,11 +45,8 @@ export async function POST(request: NextRequest) {
     // Update task status to executing
     const startedAt = new Date().toISOString();
     tasksDb.update(taskId, { status: 'executing', agent: agent.name, started_at: startedAt });
-    
-    emitAgentUpdate(agentsDb.getAll());
-    emitTaskUpdate('task:updated', { ...task, status: 'executing', agent: agent.name, started_at: startedAt });
 
-    // Trigger execution via the same API endpoint
+    // Trigger execution
     fetch('/api/execute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -115,7 +102,6 @@ export async function PATCH(request: NextRequest) {
               last_active: new Date().toISOString(),
               task_count: newTaskCount,
             });
-            emitAgentUpdate(agentsDb.getAll());
           }
         }
       }
@@ -135,14 +121,6 @@ export async function PATCH(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
 
-    emitTaskUpdate('task:updated', updatedTask);
-    emitActivity({
-      id: Date.now().toString(),
-      type: 'task_updated',
-      message: `Task "${(task as any).title}" ${status}`,
-      timestamp: new Date().toISOString(),
-    });
-
     return NextResponse.json({ success: true, task: updatedTask });
   } catch (error) {
     console.error('Failed to update task:', error);
@@ -158,17 +136,9 @@ export async function DELETE(request: NextRequest) {
     const task = tasksDb.getById(id);
     if (task) {
       tasksDb.delete(id);
-      emitTaskUpdate('task:deleted', { id });
-      emitActivity({
-        id: Date.now().toString(),
-        type: 'task_deleted',
-        message: `Task deleted`,
-        timestamp: new Date().toISOString(),
-      });
     }
   } else {
     tasksDb.clear();
-    emitTaskUpdate('task:cleared', {});
   }
 
   return NextResponse.json({ success: true });

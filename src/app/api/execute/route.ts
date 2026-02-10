@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tasksDb, agentsDb, conversationsDb } from '@/lib/db';
-import { emitTaskUpdate, emitAgentUpdate, emitActivity } from '@/lib/socket';
 
 // Agent role descriptions for OpenClaw sessions
 function getAgentRole(agentId: string): string {
@@ -146,7 +145,6 @@ export async function POST(request: NextRequest) {
     });
     
     const updatedTask = tasksDb.getById(taskId) as Record<string, any> | undefined;
-    emitTaskUpdate('task:updated', updatedTask);
 
     // Smart agent routing based on keywords
     const taskLower = task.toLowerCase();
@@ -248,7 +246,6 @@ export async function POST(request: NextRequest) {
       current_task: task,
       last_active: new Date().toISOString(),
     });
-    emitAgentUpdate(agentsDb.getAll());
 
     // Route to appropriate handler based on keywords
     let handler = KEYWORD_HANDLERS.default;
@@ -378,15 +375,6 @@ export async function POST(request: NextRequest) {
 
     // Emit real-time updates
     const finalTask = tasksDb.getById(taskId);
-    emitTaskUpdate('task:completed', finalTask);
-    emitAgentUpdate(agentsDb.getAll());
-    emitActivity({
-      id: Date.now().toString(),
-      type: 'task_completed',
-      message: `Task "${task}" completed by ${result.agent}`,
-      timestamp: completedAt,
-      duration,
-    });
 
     console.log(`[Mission Control] ✅ Completed: ${taskId} by ${result.agent} (${duration}s)`);
 
