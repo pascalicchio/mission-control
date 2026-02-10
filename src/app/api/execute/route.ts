@@ -164,6 +164,15 @@ Execute it properly and save results to the workspace. Return what you did and t
       duration,
     });
 
+    // Add completion interaction with formatted result
+    await tasksDb.addInteraction({
+      task_id: taskId,
+      agent: 'Mission Control',
+      action: 'completed',
+      message: `Task completed successfully.\n\n📄 **Deliverable:**\n${result}`,
+      timestamp: completedAt,
+    });
+
     console.log(`[Mission Control] ✅ Completed: ${taskId} (${duration}s)`);
 
     return NextResponse.json({

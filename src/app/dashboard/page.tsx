@@ -823,7 +823,9 @@ export default function Dashboard() {
             {selectedTask.result && (
               <div className="glass-card p-4">
                 <h3 className="text-sm font-semibold text-gray-400 mb-3">📋 Result</h3>
-                <p className="text-sm text-gray-300">{selectedTask.result}</p>
+                <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  {selectedTask.result}
+                </div>
               </div>
             )}
 

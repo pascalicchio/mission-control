@@ -27,16 +27,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Action not found' }, { status: 404 });
   }
   
-  // Create task from action
-  const task = await tasksDb.create({
+  const now = new Date().toISOString();
+  
+  // Create task from action - link to conversation
+  const taskData: any = {
     title: title || action.description,
     status: 'pending',
     priority: priority || 'normal',
-    created_at: new Date().toISOString(),
-  });
+    created_at: now,
+  };
   
-  // Mark action as completed
-  await extractedActionsDb.complete(String(action.id));
+  // Add conversation_id if present
+  if (action.conversation_id) {
+    taskData['conversation_id'] = action.conversation_id;
+  }
+  
+  const task = await tasksDb.create(taskData);
+  
+  // Mark action as completed and link to task
+  await extractedActionsDb.updateTask(String(action.id), task.id);
   
   return NextResponse.json({
     success: true,
