@@ -55,14 +55,14 @@ export async function PUT(request: NextRequest) {
   const { topic, participants } = await request.json();
   
   // Create conversation
-  const conversation = await conversationsDb.create({
+  const newConversation = await conversationsDb.create({
     title: `Standup: ${topic}`,
     topic,
     participants: JSON.stringify(participants),
   });
   
   // Use the Firebase-generated ID from the created conversation
-  const id = conversation.id;
+  const id = newConversation.id;
   const personas: Record<string, { emoji: string; style: string }> = {
     loki: { emoji: '🦇', style: 'research-focused, analytical, curious' },
     wanda: { emoji: '🩸', style: 'social-savvy, trendy, engaging' },
