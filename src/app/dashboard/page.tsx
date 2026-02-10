@@ -40,6 +40,40 @@ interface Activity {
   duration?: number;
 }
 
+interface Conversation {
+  id: string;
+  title: string;
+  topic: string;
+  status: string;
+  turns: number;
+  participants: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ConversationMessage {
+  id: number;
+  conversation_id: string;
+  turn: number;
+  agent_id: string;
+  agent_name: string;
+  agent_emoji: string;
+  message: string;
+  timestamp: string;
+}
+
+interface ExtractedAction {
+  id: number;
+  conversation_id: string;
+  task_id?: string;
+  description: string;
+  owner: string;
+  category: string;
+  confidence: number;
+  source_agent: string;
+  status: string;
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
@@ -53,6 +87,12 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'executing' | 'done'>('all');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+  const [extractedActions, setExtractedActions] = useState<ExtractedAction[]>([]);
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const [showConversationPanel, setShowConversationPanel] = useState(false);
 
   // Check auth
   useEffect(() => {
@@ -78,8 +118,94 @@ export default function Dashboard() {
       setTasks(tasksData.tasks || []);
       setAgents(tasksData.agents || []);
       setAnalytics(analyticsData);
+      loadConversations();
     } catch (error) {
       console.error('Failed to load data:', error);
+    }
+  };
+
+  const loadConversations = async () => {
+    try {
+      const res = await fetch('/api/conversations');
+      const data = await res.json();
+      setConversations(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+    }
+  };
+
+  const startBotStandup = async (topic: string, participants: string[]) => {
+    setConversationLoading(true);
+    try {
+      const res = await fetch('/api/conversations/messages', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, participants }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConversations([data.conversation, ...conversations]);
+        setSelectedConversation(data.conversation);
+        setConversationMessages(data.messages);
+        setExtractedActions(data.actions);
+        playSound('notification');
+      }
+    } catch (error) {
+      console.error('Failed to start standup:', error);
+    }
+    setConversationLoading(false);
+  };
+
+  const selectConversation = async (conversation: Conversation) => {
+    try {
+      const res = await fetch(`/api/conversations/messages?conversationId=${conversation.id}`);
+      const data = await res.json();
+      setSelectedConversation(data.conversation);
+      setConversationMessages(data.messages || []);
+      setExtractedActions(data.actions || []);
+    } catch (error) {
+      console.error('Failed to load conversation:', error);
+    }
+  };
+
+  const createTaskFromAction = async (action: ExtractedAction) => {
+    try {
+      const res = await fetch('/api/conversations/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          actionId: action.id, 
+          title: action.description,
+          priority: 'normal',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Update local state
+        setExtractedActions(prev => prev.map(a => 
+          a.id === action.id ? { ...a, task_id: data.taskId, status: 'completed' } : a
+        ));
+        // Refresh tasks
+        loadData();
+        playSound('success');
+      }
+    } catch (error) {
+      console.error('Failed to create task:', error);
+    }
+  };
+
+  const deleteConversation = async (id: string) => {
+    if (!confirm('Delete this conversation?')) return;
+    try {
+      await fetch(`/api/conversations?id=${id}`, { method: 'DELETE' });
+      setConversations(prev => prev.filter(c => c.id !== id));
+      if (selectedConversation?.id === id) {
+        setSelectedConversation(null);
+        setConversationMessages([]);
+        setExtractedActions([]);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
     }
   };
 
@@ -343,6 +469,60 @@ export default function Dashboard() {
                   <p className="text-gray-600">{new Date(activity.timestamp).toLocaleTimeString()}</p>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Bot Conversations Panel */}
+          <div className="mt-6 pt-6 border-t border-white/5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-gray-400">🤖 Bot Conversations</h3>
+              <button 
+                onClick={() => {
+                  const topic = prompt('What topic should the bots discuss?');
+                  if (topic) {
+                    startBotStandup(topic, agents.slice(0, 4).map(a => a.id));
+                  }
+                }}
+                className="px-2 py-1 text-xs bg-purple-500/20 text-purple-400 rounded-lg border border-purple-500/30 hover:bg-purple-500/30 transition-colors"
+              >
+                + Start Standup
+              </button>
+            </div>
+            
+            {/* Conversation List */}
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {conversations.slice(0, 5).map((conv) => (
+                <div 
+                  key={conv.id} 
+                  onClick={() => selectConversation(conv)}
+                  className={`p-3 glass-card cursor-pointer transition-all ${
+                    selectedConversation?.id === conv.id ? 'border-purple-500/50 bg-purple-500/10' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium truncate flex-1">{conv.title}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      conv.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {conv.turns} turns
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {JSON.parse(conv.participants || '[]').slice(0, 4).map((p: string, i: number) => (
+                      <span key={i} className="text-xs text-gray-500">
+                        {agents.find(a => a.id === p)?.emoji || '🤖'}{i < 3 ? '' : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              
+              {conversations.length === 0 && (
+                <p className="text-xs text-gray-500 text-center py-4">
+                  No conversations yet.<br/>
+                  <span className="text-purple-400">Click "+ Start Standup" to get the bots talking!</span>
+                </p>
+              )}
             </div>
           </div>
         </aside>
@@ -656,6 +836,114 @@ export default function Dashboard() {
               <button onClick={() => selectedTask && reRunTask(selectedTask)} className="glass-button-primary flex-1">🔄 Re-run Task</button>
               <button className="glass-button flex-1">📝 Edit Task</button>
               <button onClick={() => selectedTask && deleteTask(selectedTask.id)} className="glass-button text-red-400 border-red-500/30 hover:bg-red-500/10">🗑️ Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bot Conversation Detail Modal */}
+      {selectedConversation && (
+        <div className="modal-overlay" onClick={() => setSelectedConversation(null)}>
+          <div className="modal-content p-6 max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold gradient-text">{selectedConversation.title}</h2>
+                <p className="text-sm text-gray-400">{selectedConversation.turns} turns • {new Date(selectedConversation.updated_at).toLocaleString()}</p>
+              </div>
+              <button onClick={() => setSelectedConversation(null)} className="text-gray-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            {/* Conversation Content */}
+            <div className="flex-1 overflow-hidden flex gap-4">
+              {/* Messages Column */}
+              <div className="flex-1 overflow-y-auto glass-card p-4 max-h-[50vh]">
+                <h3 className="text-sm font-semibold text-purple-400 mb-3">💬 Bot Conversation</h3>
+                <div className="space-y-3">
+                  {conversationMessages.map((msg, i) => (
+                    <div key={i} className="flex gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-sm flex-shrink-0">
+                        {msg.agent_emoji}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium">{msg.agent_name}</span>
+                          <span className="text-xs text-gray-500">Turn {msg.turn}</span>
+                        </div>
+                        <p className="text-sm text-gray-300">{msg.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Extracted Actions Column */}
+              <div className="w-80 glass-card p-4 max-h-[50vh] overflow-y-auto">
+                <h3 className="text-sm font-semibold text-green-400 mb-3">⚡ Action Items</h3>
+                <div className="space-y-3">
+                  {extractedActions.map((action) => (
+                    <div 
+                      key={action.id} 
+                      className={`p-3 rounded-lg border ${
+                        action.status === 'completed' 
+                          ? 'bg-green-500/10 border-green-500/30' 
+                          : 'bg-white/5 border-white/10 hover:border-purple-500/30'
+                      }`}
+                    >
+                      <p className="text-sm mb-2">{action.description}</p>
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span>{agents.find(a => a.id === action.owner)?.emoji || '🤖'}</span>
+                          <span className="text-gray-500">{action.category}</span>
+                        </div>
+                        <span className={`${
+                          action.confidence >= 0.9 ? 'text-green-400' : 
+                          action.confidence >= 0.8 ? 'text-yellow-400' : 'text-orange-400'
+                        }`}>
+                          {Math.round(action.confidence * 100)}% confidence
+                        </span>
+                      </div>
+                      {action.status !== 'completed' && (
+                        <button 
+                          onClick={() => createTaskFromAction(action)}
+                          className="mt-2 w-full py-1.5 text-xs bg-purple-500/20 text-purple-400 rounded border border-purple-500/30 hover:bg-purple-500/30 transition-colors"
+                        >
+                          + Create Task
+                        </button>
+                      )}
+                      {action.task_id && (
+                        <p className="mt-2 text-xs text-green-400">✓ Task created</p>
+                      )}
+                    </div>
+                  ))}
+                  
+                  {extractedActions.length === 0 && (
+                    <p className="text-xs text-gray-500 text-center py-4">
+                      No action items extracted yet.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span>Participants:</span>
+                {JSON.parse(selectedConversation.participants || '[]').map((p: string) => (
+                  <span key={p} className="px-2 py-0.5 bg-white/5 rounded">
+                    {agents.find(a => a.id === p)?.emoji} {agents.find(a => a.id === p)?.name}
+                  </span>
+                ))}
+              </div>
+              <button 
+                onClick={() => selectedConversation && deleteConversation(selectedConversation.id)}
+                className="px-3 py-1.5 text-xs text-red-400 border border-red-500/30 rounded hover:bg-red-500/10 transition-colors"
+              >
+                🗑️ Delete Conversation
+              </button>
             </div>
           </div>
         </div>

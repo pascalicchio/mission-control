@@ -40,6 +40,43 @@ db.exec(`
     task_count INTEGER DEFAULT 0,
     success_rate REAL DEFAULT 100
   );
+
+  CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    topic TEXT,
+    status TEXT DEFAULT 'active',
+    turns INTEGER DEFAULT 0,
+    participants TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT,
+    turn INTEGER,
+    agent_id TEXT,
+    agent_name TEXT,
+    agent_emoji TEXT,
+    message TEXT,
+    timestamp TEXT,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS extracted_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT,
+    task_id TEXT,
+    description TEXT,
+    owner TEXT,
+    category TEXT,
+    confidence REAL,
+    source_agent TEXT,
+    status TEXT DEFAULT 'pending',
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+    FOREIGN KEY (task_id) REFERENCES tasks(id)
+  );
 `);
 
 // Seed agents if not exists
@@ -146,6 +183,89 @@ export const agentsDb = {
     
     db.prepare(`UPDATE agents SET ${setClause} WHERE id = ?`).run(...values);
     return agentsDb.getById(id);
+  },
+};
+
+// Conversation operations
+export const conversationsDb = {
+  getAll: () => db.prepare('SELECT * FROM conversations ORDER BY updated_at DESC').all(),
+  
+  getById: (id: string) => db.prepare('SELECT * FROM conversations WHERE id = ?').get(id),
+  
+  create: (conversation: {
+    id: string;
+    title: string;
+    topic: string;
+    participants: string;
+  }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO conversations (id, title, topic, participants, status, turns, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'active', 0, ?, ?)
+    `).run(conversation.id, conversation.title, conversation.topic, conversation.participants, now, now);
+    return conversationsDb.getById(conversation.id);
+  },
+  
+  addMessage: (message: {
+    conversation_id: string;
+    turn: number;
+    agent_id: string;
+    agent_name: string;
+    agent_emoji: string;
+    message: string;
+  }) => {
+    const timestamp = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO conversation_messages (conversation_id, turn, agent_id, agent_name, agent_emoji, message, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(message.conversation_id, message.turn, message.agent_id, message.agent_name, message.agent_emoji, message.message, timestamp);
+    
+    // Update conversation turn count and timestamp
+    db.prepare(`UPDATE conversations SET turns = ?, updated_at = ? WHERE id = ?`).run(message.turn, timestamp, message.conversation_id);
+  },
+  
+  getMessages: (conversationId: string) => db.prepare('SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY turn ASC').all(conversationId),
+  
+  close: (id: string) => {
+    db.prepare(`UPDATE conversations SET status = 'closed' WHERE id = ?`).run(id);
+  },
+  
+  delete: (id: string) => {
+    db.prepare('DELETE FROM extracted_actions WHERE conversation_id = ?').run(id);
+    db.prepare('DELETE FROM conversation_messages WHERE conversation_id = ?').run(id);
+    db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
+  },
+};
+
+// Extracted actions from conversations
+export const extractedActionsDb = {
+  getByConversation: (conversationId: string) => 
+    db.prepare('SELECT * FROM extracted_actions WHERE conversation_id = ? ORDER BY id ASC').all(conversationId),
+  
+  create: (action: {
+    conversation_id: string;
+    task_id?: string;
+    description: string;
+    owner: string;
+    category: string;
+    confidence: number;
+    source_agent: string;
+  }) => {
+    db.prepare(`
+      INSERT INTO extracted_actions (conversation_id, task_id, description, owner, category, confidence, source_agent, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+    `).run(action.conversation_id, action.task_id, action.description, action.owner, action.category, action.confidence, action.source_agent);
+    return db.prepare('SELECT * FROM extracted_actions WHERE id = ?').get(db.prepare('SELECT last_insert_rowid() as id').get() as any);
+  },
+  
+  updateTask: (id: string, taskId: string) => {
+    db.prepare(`UPDATE extracted_actions SET task_id = ? WHERE id = ?`).run(taskId, id);
+  },
+  
+  getPending: () => db.prepare('SELECT * FROM extracted_actions WHERE status = "pending"').all(),
+  
+  complete: (id: string) => {
+    db.prepare(`UPDATE extracted_actions SET status = 'completed' WHERE id = ?`).run(id);
   },
 };
 
