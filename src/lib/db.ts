@@ -13,7 +13,6 @@ async function getFirestore() {
     
     const app = initializeApp({
       credential: cert(serviceAccount),
-      databaseURL: 'https://mission-board-70cab.firebaseio.com',
     });
     
     firestore = getFirestoreDb(app);
@@ -131,7 +130,8 @@ export const tasksDb = {
     const db = await getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('tasks').orderBy('created_at', 'desc').get();
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+    // @ts-ignore - Firestore types complex with dynamic imports
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Task));
   },
   
   getById: async (id: string): Promise<Task | undefined> => {
@@ -181,7 +181,8 @@ export const tasksDb = {
     const db = await getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('interactions').where('task_id', '==', taskId).orderBy('timestamp', 'asc').get();
-    return snapshot.docs.map(doc => {
+    // @ts-ignore
+    return snapshot.docs.map((doc: any) => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -205,7 +206,8 @@ export const tasksDb = {
     await initAgents(db);
     const snapshot = await db.collection('tasks').get();
     const batch = db.batch();
-    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    // @ts-ignore
+    snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
     await batch.commit();
   },
 };
@@ -216,7 +218,8 @@ export const agentsDb = {
     const db = await getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('agents').get();
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Agent));
+    // @ts-ignore
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Agent));
   },
   
   getById: async (id: string): Promise<Agent | undefined> => {
@@ -240,7 +243,8 @@ export const conversationsDb = {
     const db = await getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('conversations').orderBy('updated_at', 'desc').get();
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Conversation));
+    // @ts-ignore
+    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Conversation));
   },
   
   getById: async (id: string): Promise<Conversation | undefined> => {
@@ -288,7 +292,8 @@ export const conversationsDb = {
       .where('conversation_id', '==', conversationId)
       .orderBy('turn', 'asc')
       .get();
-    return snapshot.docs.map(doc => {
+    // @ts-ignore
+    return snapshot.docs.map((doc: any) => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -314,12 +319,14 @@ export const conversationsDb = {
     await initAgents(db);
     const msgSnapshot = await db.collection('conversation_messages').where('conversation_id', '==', id).get();
     const msgBatch = db.batch();
-    msgSnapshot.docs.forEach(doc => msgBatch.delete(doc.ref));
+    // @ts-ignore
+    msgSnapshot.docs.forEach((doc: any) => msgBatch.delete(doc.ref));
     await msgBatch.commit();
     
     const actionSnapshot = await db.collection('extracted_actions').where('conversation_id', '==', id).get();
     const actionBatch = db.batch();
-    actionSnapshot.docs.forEach(doc => actionBatch.delete(doc.ref));
+    // @ts-ignore
+    actionSnapshot.docs.forEach((doc: any) => actionBatch.delete(doc.ref));
     await actionBatch.commit();
     
     await db.collection('conversations').doc(id).delete();
@@ -335,7 +342,8 @@ export const extractedActionsDb = {
       .where('conversation_id', '==', conversationId)
       .orderBy('id', 'asc')
       .get();
-    return snapshot.docs.map(doc => {
+    // @ts-ignore
+    return snapshot.docs.map((doc: any) => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -375,7 +383,8 @@ export const extractedActionsDb = {
     const db = await getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('extracted_actions').where('status', '==', 'pending').get();
-    return snapshot.docs.map(doc => {
+    // @ts-ignore
+    return snapshot.docs.map((doc: any) => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
