@@ -460,7 +460,8 @@ export const extractedActionsDb = {
     const db = getFirestore();
     await initAgents(db);
     try {
-      const snapshot = await db.collection('extracted_actions').where('conversation_id', '==', action.conversation_id).limit(1).get();
+      // Get count of existing actions for this conversation (without limit to avoid index)
+      const snapshot = await db.collection('extracted_actions').where('conversation_id', '==', action.conversation_id).get();
       const id = snapshot.size + 1;
       const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id: String(id) });
       return { id, status: 'pending', ...action };
