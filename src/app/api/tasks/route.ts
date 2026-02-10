@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
     emitAgentUpdate(agentsDb.getAll());
     emitTaskUpdate('task:updated', { ...task, status: 'executing', agent: agent.name, started_at: startedAt });
 
-    // Trigger execution (fire and forget)
-    fetch('http://localhost:3000/api/execute', {
+    // Trigger execution via the same API endpoint
+    fetch('/api/execute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task: title, taskId, priority }),

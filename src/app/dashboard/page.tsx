@@ -142,12 +142,12 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        // Reload conversations list
-        await loadConversations();
-        // Select the new conversation (it's the most recently updated one)
+        // Select the new conversation directly from API response
         setSelectedConversation(data.conversation);
         setConversationMessages(data.messages || []);
         setExtractedActions(data.actions || []);
+        // Reload conversations list in background
+        loadConversations();
         playSound('notification');
       }
     } catch (error) {
