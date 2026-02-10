@@ -19,8 +19,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const { actionId, title, priority } = await request.json();
   
-  const actions = extractedActionsDb.getByConversation('pending'.split('').reverse().join(''));
-  const action = (actions as any[]).find((a: any) => a.id === actionId);
+  // Get all pending actions and find by ID
+  const pendingActions = extractedActionsDb.getPending();
+  const action = pendingActions.find((a: any) => a.id === Number(actionId));
   
   if (!action) {
     return NextResponse.json({ error: 'Action not found' }, { status: 404 });
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
   });
   
   // Mark action as completed
-  extractedActionsDb.updateTask(action.id, taskId);
+  extractedActionsDb.complete(String(action.id));
   
   return NextResponse.json({
     success: true,

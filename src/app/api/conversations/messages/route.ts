@@ -130,12 +130,16 @@ export async function PUT(request: NextRequest) {
     ],
   };
   
-  // Simulate conversation turns
+  // Simulate conversation turns with variety
   for (let turn = 1; turn <= 5; turn++) {
-    for (const participant of participants) {
+    for (let i = 0; i < participants.length; i++) {
+      const participant = participants[i];
       const persona = personas[participant] || { emoji: '🤖', style: 'helpful' };
       const messages = responses[participant] || ["I think we should explore this further.", "Let me know how I can help with this."];
-      const message = messages[Math.floor(Math.random() * messages.length)];
+      
+      // Use turn + participant index to pick different messages each turn
+      const messageIndex = (turn * (i + 1)) % messages.length;
+      const message = messages[messageIndex];
       
       conversationsDb.addMessage({
         conversation_id: id,
