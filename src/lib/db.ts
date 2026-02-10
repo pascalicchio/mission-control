@@ -13,6 +13,7 @@ db.exec(`
     priority TEXT DEFAULT 'normal',
     agent TEXT,
     result TEXT,
+    conversation_id TEXT,
     created_at TEXT,
     started_at TEXT,
     completed_at TEXT,

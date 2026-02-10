@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { tasksDb, agentsDb } from '@/lib/db';
+import { tasksDb, agentsDb, conversationsDb } from '@/lib/db';
 import { emitTaskUpdate, emitAgentUpdate, emitActivity } from '@/lib/socket';
 
 // Agent role descriptions for OpenClaw sessions
@@ -264,6 +264,87 @@ export async function POST(request: NextRequest) {
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     const result = await handler(task);
+
+    // Create bot conversation for this task
+    const convId = `conv_${taskId}`;
+    const participants = [agent.id, ...allAgents.filter((a: any) => a.id !== agent.id).slice(0, 2).map((a: any) => a.id)];
+    
+    conversationsDb.create({
+      id: convId,
+      title: `Task: ${task.substring(0, 50)}...`,
+      topic: task,
+      participants: JSON.stringify(participants),
+    });
+
+    // Add bot conversation messages
+    const conversationMessages: Record<string, string[]> = {
+      loki: [
+        "I've gathered some initial data on this topic. The research looks promising!",
+        "Found several relevant sources. Let me analyze the key points.",
+        "Based on my research, here are the main insights to consider...",
+      ],
+      wanda: [
+        "Great angle! I can see some engaging content opportunities here.",
+        "Let me craft some compelling messaging that will resonate.",
+        "I've got some ideas for how to present this in an engaging way.",
+      ],
+      pulse: [
+        "This would make excellent content! I'm already outlining the structure.",
+        "The narrative arc is clear - let me draft something compelling.",
+        "SEO opportunities here are abundant. Let me optimize the content.",
+      ],
+      vision: [
+        "Let me analyze the strategic implications of this approach.",
+        "I've mapped out the key decision points. Here's my assessment...",
+        "Based on the data, here are the recommended next steps.",
+      ],
+      friday: [
+        "I've sketched out the technical approach. Let me start coding.",
+        "The architecture is clear. I'll implement this efficiently.",
+        "Building out the solution now. Code is almost ready for review.",
+      ],
+      jocasta: [
+        "I've set up the workflow automation for this task.",
+        "Scheduling the follow-up actions. The system will track progress.",
+        "Automation is running smoothly. Let me monitor the results.",
+      ],
+      maria: [
+        "The integration points are ready. Let me connect the APIs.",
+        "Data flow is configured. Systems are talking to each other.",
+        "Integration complete. All endpoints are responding correctly.",
+      ],
+      fury: [
+        "Let me review this approach for any potential issues.",
+        "I've identified a few areas that need attention. Here's my feedback...",
+        "The analysis is complete. Here's my thorough assessment.",
+      ],
+      phil: [
+        "Deployment pipeline is ready. Let me push this to production.",
+        "All tests are passing. Initiating the release process.",
+        "Live now! The deployment completed successfully.",
+      ],
+      miles: [
+        "I've visualized some concepts. Let me show you the options.",
+        "The design direction is clear. Here are the refined visuals.",
+        "Finalizing the visual assets. They'll be ready shortly.",
+      ],
+    };
+
+    const messages = conversationMessages[agent.id] || conversationMessages.friday;
+    for (let turn = 1; turn <= messages.length; turn++) {
+      conversationsDb.addMessage({
+        conversation_id: convId,
+        turn,
+        agent_id: agent.id,
+        agent_name: agent.name,
+        agent_emoji: agent.emoji,
+        message: messages[turn - 1],
+      });
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Update task with conversation link
+    tasksDb.update(taskId, { conversation_id: convId });
 
     // Update task as completed
     const completedAt = new Date().toISOString();

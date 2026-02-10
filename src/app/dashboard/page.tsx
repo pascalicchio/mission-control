@@ -222,7 +222,19 @@ export default function Dashboard() {
     try {
       const res = await fetch(`/api/tasks/${task.id}`);
       const data = await res.json();
-      setSelectedTask(data.task);
+      const taskData = data.task;
+      setSelectedTask(taskData);
+      
+      // Also fetch conversation if exists
+      if (taskData.conversation_id) {
+        const convRes = await fetch(`/api/conversations/messages?conversationId=${taskData.conversation_id}`);
+        const convData = await convRes.json();
+        setSelectedConversation(convData.conversation);
+        setConversationMessages(convData.messages || []);
+      } else {
+        setSelectedConversation(null);
+        setConversationMessages([]);
+      }
     } catch (error) {
       console.error('Failed to fetch task details:', error);
       setSelectedTask(task);
@@ -288,6 +300,12 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Failed to delete task:', error);
     }
+  };
+
+  const closeTaskModal = () => {
+    setSelectedTask(null);
+    setSelectedConversation(null);
+    setConversationMessages([]);
   };
 
   const reRunTask = async (task: Task) => {
@@ -728,7 +746,7 @@ export default function Dashboard() {
 
       {/* Task Detail Modal */}
       {selectedTask && (
-        <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
+        <div className="modal-overlay" onClick={closeTaskModal}>
           <div className="modal-content p-6" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-start justify-between mb-6">
@@ -747,7 +765,7 @@ export default function Dashboard() {
                 </div>
                 <h2 className="text-xl font-bold">{selectedTask.title}</h2>
               </div>
-              <button onClick={() => setSelectedTask(null)} className="text-gray-400 hover:text-white">
+              <button onClick={closeTaskModal} className="text-gray-400 hover:text-white">
                 ✕
               </button>
             </div>
@@ -801,6 +819,32 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
+
+            {/* Bot Conversation */}
+            {selectedConversation && conversationMessages.length > 0 && (
+              <div className="glass-card p-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-purple-400">💬 Bot Conversation</h3>
+                  <span className="text-xs text-gray-500">{conversationMessages.length} messages</span>
+                </div>
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {conversationMessages.map((msg, i) => (
+                    <div key={i} className="flex gap-3 p-3 bg-purple-500/5 rounded-lg border border-purple-500/10">
+                      <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-sm flex-shrink-0">
+                        {msg.agent_emoji}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium text-purple-300">{msg.agent_name}</span>
+                          <span className="text-xs text-gray-600">Turn {msg.turn}</span>
+                        </div>
+                        <p className="text-sm text-gray-300">{msg.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Result */}
             {selectedTask.result && (
