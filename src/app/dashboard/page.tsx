@@ -155,11 +155,10 @@ export default function Dashboard() {
       if (data.success) {
         // Reload conversations list
         await loadConversations();
-        // Select the new conversation
-        const newConv = conversations.find(c => c.id === data.conversation.id) || data.conversation;
-        setSelectedConversation(newConv);
-        setConversationMessages(data.messages);
-        setExtractedActions(data.actions);
+        // Select the new conversation (it's the most recently updated one)
+        setSelectedConversation(data.conversation);
+        setConversationMessages(data.messages || []);
+        setExtractedActions(data.actions || []);
         playSound('notification');
       }
     } catch (error) {
@@ -234,9 +233,11 @@ export default function Dashboard() {
         const convData = await convRes.json();
         setSelectedConversation(convData.conversation);
         setConversationMessages(convData.messages || []);
+        setExtractedActions(convData.actions || []);
       } else {
         setSelectedConversation(null);
         setConversationMessages([]);
+        setExtractedActions([]);
       }
     } catch (error) {
       console.error('Failed to fetch task details:', error);
@@ -286,6 +287,10 @@ export default function Dashboard() {
       const data = await res.json();
       if (data.success) {
         setNewTask('');
+        // Reload tasks to see the new task
+        const tasksRes = await fetch('/api/tasks');
+        const tasksData = await tasksRes.json();
+        setTasks(tasksData.tasks || []);
       }
     } catch (error) {
       console.error('Failed to create task:', error);
