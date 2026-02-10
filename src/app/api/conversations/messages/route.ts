@@ -54,9 +54,15 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   const { topic, participants } = await request.json();
   
-  const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  // Create conversation
+  const conversation = await conversationsDb.create({
+    title: `Standup: ${topic}`,
+    topic,
+    participants: JSON.stringify(participants),
+  });
   
-  // Bot personas for variety
+  // Use the Firebase-generated ID from the created conversation
+  const id = conversation.id;
   const personas: Record<string, { emoji: string; style: string }> = {
     loki: { emoji: '🦇', style: 'research-focused, analytical, curious' },
     wanda: { emoji: '🩸', style: 'social-savvy, trendy, engaging' },
