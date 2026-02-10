@@ -324,6 +324,10 @@ export default function Dashboard() {
       if (data.success) {
         // Close modal and clear conversation
         closeTaskModal();
+        // Reload tasks to see new task in list
+        const tasksRes = await fetch('/api/tasks');
+        const tasksData = await tasksRes.json();
+        setTasks(tasksData.tasks || []);
         // Trigger execution
         await fetch('/api/execute', {
           method: 'POST',
