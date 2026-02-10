@@ -460,21 +460,29 @@ export const extractedActionsDb = {
     const db = getFirestore();
     await initAgents(db);
     try {
-      // Get count of existing actions for this conversation (without limit to avoid index)
-      const snapshot = await db.collection('extracted_actions').where('conversation_id', '==', action.conversation_id).get();
-      const id = snapshot.size + 1;
-      const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id: String(id) });
-      return { id, status: 'pending', ...action };
+      // Use the Firestore auto-generated ID as the id
+      const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending' });
+      return { id: docRef.id, status: 'pending', ...action };
     } catch (e) {
-      const docRef = await db.collection('extracted_actions').add({ ...action, status: 'pending', id: '1' });
-      return { id: 1, status: 'pending', ...action };
+      console.error('Failed to create action:', e);
+      throw e;
     }
   },
   
   updateTask: async (id: string, taskId: string): Promise<void> => {
     const db = getFirestore();
     await initAgents(db);
-    await db.collection('extracted_actions').doc(id).update({ task_id: taskId, status: 'completed' });
+    // First try to find by Firestore doc ID
+    const doc = await db.collection('extracted_actions').doc(id).get();
+    if (doc.exists) {
+      await doc.ref.update({ task_id: taskId, status: 'completed' });
+    } else {
+      // Fallback: try to find by id field (legacy)
+      const snapshot = await db.collection('extracted_actions').where('id', '==', Number(id)).limit(1).get();
+      if (!snapshot.empty) {
+        await snapshot.docs[0].ref.update({ task_id: taskId, status: 'completed' });
+      }
+    }
   },
   
   getPending: async (): Promise<ExtractedAction[]> => {
@@ -500,7 +508,17 @@ export const extractedActionsDb = {
   complete: async (id: string): Promise<void> => {
     const db = getFirestore();
     await initAgents(db);
-    await db.collection('extracted_actions').doc(id).update({ status: 'completed' });
+    // First try to find by Firestore doc ID
+    const doc = await db.collection('extracted_actions').doc(id).get();
+    if (doc.exists) {
+      await doc.ref.update({ status: 'completed' });
+    } else {
+      // Fallback: try to find by id field (legacy)
+      const snapshot = await db.collection('extracted_actions').where('id', '==', Number(id)).limit(1).get();
+      if (!snapshot.empty) {
+        await snapshot.docs[0].ref.update({ status: 'completed' });
+      }
+    }
   },
 };
 
