@@ -280,8 +280,8 @@ export const tasksDb = {
   getInteractions: async (taskId: string): Promise<Interaction[]> => {
     const db = getFirestore();
     await initAgents(db);
-    const snapshot = await db.collection('interactions').where('task_id', '==', taskId).orderBy('timestamp', 'asc').get();
-    return snapshot.docs.map(doc => {
+    const snapshot = await db.collection('interactions').where('task_id', '==', taskId).get();
+    const interactions = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -292,6 +292,8 @@ export const tasksDb = {
         timestamp: data.timestamp,
       } as Interaction;
     });
+    // Sort by timestamp in memory
+    return interactions.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   },
   
   delete: async (id: string): Promise<void> => {
@@ -383,11 +385,12 @@ export const conversationsDb = {
   getMessages: async (conversationId: string): Promise<ConversationMessage[]> => {
     const db = getFirestore();
     await initAgents(db);
+    // Get all messages for conversation (no orderBy to avoid index requirement)
     const snapshot = await db.collection('conversation_messages')
       .where('conversation_id', '==', conversationId)
-      .orderBy('turn', 'asc')
       .get();
-    return snapshot.docs.map(doc => {
+    // Sort by turn in memory
+    const messages = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -400,6 +403,7 @@ export const conversationsDb = {
         timestamp: data.timestamp,
       } as ConversationMessage;
     });
+    return messages.sort((a, b) => a.turn - b.turn);
   },
   
   close: async (id: string): Promise<void> => {
@@ -638,8 +642,10 @@ export const stepsDb = {
   getByMission: async (missionId: string): Promise<MissionStep[]> => {
     const db = getFirestore();
     await initAgents(db);
-    const snapshot = await db.collection('steps').where('mission_id', '==', missionId).orderBy('created_at', 'asc').get();
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MissionStep));
+    const snapshot = await db.collection('steps').where('mission_id', '==', missionId).get();
+    const steps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MissionStep));
+    // Sort by created_at in memory
+    return steps.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   },
   
   getById: async (id: string): Promise<MissionStep | undefined> => {
