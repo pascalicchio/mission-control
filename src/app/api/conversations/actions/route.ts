@@ -47,6 +47,24 @@ export async function POST(request: NextRequest) {
   // Mark action as completed and link to task
   await extractedActionsDb.updateTask(String(action.id), task.id);
   
+  // AUTO-EXECUTE: Trigger task execution immediately
+  try {
+    const execRes = await fetch(new URL('/api/execute', request.url).toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: task.title,
+        taskId: task.id,
+        priority: task.priority,
+      }),
+    });
+    
+    const execData = await execRes.json();
+    console.log(`[Actions] Auto-executed task ${task.id}: ${execData.success ? 'success' : 'failed'}`);
+  } catch (e: any) {
+    console.error('[Actions] Auto-execution failed:', e.message);
+  }
+  
   return NextResponse.json({
     success: true,
     taskId: task.id,
