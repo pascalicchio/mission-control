@@ -153,8 +153,11 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        setConversations([data.conversation, ...conversations]);
-        setSelectedConversation(data.conversation);
+        // Reload conversations list
+        await loadConversations();
+        // Select the new conversation
+        const newConv = conversations.find(c => c.id === data.conversation.id) || data.conversation;
+        setSelectedConversation(newConv);
         setConversationMessages(data.messages);
         setExtractedActions(data.actions);
         playSound('notification');
