@@ -1,23 +1,30 @@
+import * as admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 
-// Lazy Firestore client - only initialize when actually needed
-let firestore: any = null;
+// Initialize Firebase Admin once
+let adminApp: admin.app.App | null = null;
+let firestore: FirebaseFirestore.Firestore | null = null;
 
-async function getFirestore() {
+function getFirestore(): FirebaseFirestore.Firestore {
   if (!firestore) {
-    // Dynamic import to avoid build-time initialization
-    const { initializeApp, cert, applicationDefault } = await import('firebase-admin/app');
-    const { getFirestore: getFirestoreDb } = await import('firebase-admin/firestore');
-    
-    const serviceAccount = JSON.parse(readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8'));
-    
-    const app = initializeApp({
-      credential: cert(serviceAccount),
-    });
-    
-    firestore = getFirestoreDb(app);
+    try {
+      const serviceAccount = JSON.parse(readFileSync('/root/.openclaw/.firebase/service-account.json', 'utf8'));
+      
+      if (!admin.apps.length) {
+        adminApp = admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+      } else {
+        adminApp = admin.apps[0];
+      }
+      
+      firestore = admin.firestore();
+    } catch (e) {
+      console.error('Firebase init error:', e);
+      throw e;
+    }
   }
-  return firestore;
+  return firestore!;
 }
 
 // Interfaces
@@ -106,7 +113,7 @@ const defaultAgents: Agent[] = [
 
 // Initialize agents lazily
 let agentsInitialized = false;
-async function initAgents(db: any) {
+async function initAgents(db: FirebaseFirestore.Firestore) {
   if (agentsInitialized) return;
   try {
     const snapshot = await db.collection('agents').limit(1).get();
@@ -119,7 +126,6 @@ async function initAgents(db: any) {
     }
     agentsInitialized = true;
   } catch (e) {
-    // Ignore - will retry on first actual use
     console.log('Agents initialization deferred');
   }
 }
@@ -127,22 +133,21 @@ async function initAgents(db: any) {
 // Tasks
 export const tasksDb = {
   getAll: async (): Promise<Task[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('tasks').orderBy('created_at', 'desc').get();
-    // @ts-ignore - Firestore types complex with dynamic imports
-    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Task));
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
   },
   
   getById: async (id: string): Promise<Task | undefined> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const doc = await db.collection('tasks').doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } as Task : undefined;
   },
   
   addInteraction: async (interaction: Omit<Interaction, 'id'>): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     try {
       const snapshot = await db.collection('interactions').where('task_id', '==', interaction.task_id).limit(1).get();
@@ -155,7 +160,7 @@ export const tasksDb = {
   },
   
   create: async (task: Omit<Task, 'id'>): Promise<Task> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const docRef = await db.collection('tasks').add(task);
     
@@ -171,18 +176,17 @@ export const tasksDb = {
   },
   
   update: async (id: string, updates: Partial<Task>): Promise<Task | undefined> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     await db.collection('tasks').doc(id).update(updates);
     return tasksDb.getById(id);
   },
   
   getInteractions: async (taskId: string): Promise<Interaction[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('interactions').where('task_id', '==', taskId).orderBy('timestamp', 'asc').get();
-    // @ts-ignore
-    return snapshot.docs.map((doc: any) => {
+    return snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -196,18 +200,17 @@ export const tasksDb = {
   },
   
   delete: async (id: string): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     await db.collection('tasks').doc(id).delete();
   },
   
   clear: async (): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('tasks').get();
     const batch = db.batch();
-    // @ts-ignore
-    snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
     await batch.commit();
   },
 };
@@ -215,22 +218,21 @@ export const tasksDb = {
 // Agents
 export const agentsDb = {
   getAll: async (): Promise<Agent[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('agents').get();
-    // @ts-ignore
-    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Agent));
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Agent));
   },
   
   getById: async (id: string): Promise<Agent | undefined> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const doc = await db.collection('agents').doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } as Agent : undefined;
   },
   
   update: async (id: string, updates: Partial<Agent>): Promise<Agent | undefined> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     await db.collection('agents').doc(id).update(updates);
     return agentsDb.getById(id);
@@ -240,22 +242,21 @@ export const agentsDb = {
 // Conversations
 export const conversationsDb = {
   getAll: async (): Promise<Conversation[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('conversations').orderBy('updated_at', 'desc').get();
-    // @ts-ignore
-    return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Conversation));
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Conversation));
   },
   
   getById: async (id: string): Promise<Conversation | undefined> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const doc = await db.collection('conversations').doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } as Conversation : undefined;
   },
   
   create: async (conversation: Omit<Conversation, 'id' | 'status' | 'turns' | 'created_at' | 'updated_at'>): Promise<Conversation> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const now = new Date().toISOString();
     const docRef = await db.collection('conversations').add({
@@ -269,9 +270,8 @@ export const conversationsDb = {
   },
   
   addMessage: async (message: Omit<ConversationMessage, 'id' | 'timestamp'>): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
-    const conv = await conversationsDb.getById(message.conversation_id);
     const timestamp = new Date().toISOString();
     
     await db.collection('conversation_messages').add({
@@ -286,14 +286,13 @@ export const conversationsDb = {
   },
   
   getMessages: async (conversationId: string): Promise<ConversationMessage[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('conversation_messages')
       .where('conversation_id', '==', conversationId)
       .orderBy('turn', 'asc')
       .get();
-    // @ts-ignore
-    return snapshot.docs.map((doc: any) => {
+    return snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -309,24 +308,22 @@ export const conversationsDb = {
   },
   
   close: async (id: string): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     await db.collection('conversations').doc(id).update({ status: 'closed' });
   },
   
   delete: async (id: string): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const msgSnapshot = await db.collection('conversation_messages').where('conversation_id', '==', id).get();
     const msgBatch = db.batch();
-    // @ts-ignore
-    msgSnapshot.docs.forEach((doc: any) => msgBatch.delete(doc.ref));
+    msgSnapshot.docs.forEach(doc => msgBatch.delete(doc.ref));
     await msgBatch.commit();
     
     const actionSnapshot = await db.collection('extracted_actions').where('conversation_id', '==', id).get();
     const actionBatch = db.batch();
-    // @ts-ignore
-    actionSnapshot.docs.forEach((doc: any) => actionBatch.delete(doc.ref));
+    actionSnapshot.docs.forEach(doc => actionBatch.delete(doc.ref));
     await actionBatch.commit();
     
     await db.collection('conversations').doc(id).delete();
@@ -336,14 +333,13 @@ export const conversationsDb = {
 // Extracted Actions
 export const extractedActionsDb = {
   getByConversation: async (conversationId: string): Promise<ExtractedAction[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('extracted_actions')
       .where('conversation_id', '==', conversationId)
       .orderBy('id', 'asc')
       .get();
-    // @ts-ignore
-    return snapshot.docs.map((doc: any) => {
+    return snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -360,7 +356,7 @@ export const extractedActionsDb = {
   },
   
   create: async (action: Omit<ExtractedAction, 'id' | 'status'>): Promise<ExtractedAction> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     try {
       const snapshot = await db.collection('extracted_actions').where('conversation_id', '==', action.conversation_id).limit(1).get();
@@ -374,17 +370,16 @@ export const extractedActionsDb = {
   },
   
   updateTask: async (id: string, taskId: string): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     await db.collection('extracted_actions').doc(id).update({ task_id: taskId, status: 'completed' });
   },
   
   getPending: async (): Promise<ExtractedAction[]> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     const snapshot = await db.collection('extracted_actions').where('status', '==', 'pending').get();
-    // @ts-ignore
-    return snapshot.docs.map((doc: any) => {
+    return snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -401,7 +396,7 @@ export const extractedActionsDb = {
   },
   
   complete: async (id: string): Promise<void> => {
-    const db = await getFirestore();
+    const db = getFirestore();
     await initAgents(db);
     await db.collection('extracted_actions').doc(id).update({ status: 'completed' });
   },
