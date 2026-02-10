@@ -436,9 +436,9 @@ export const extractedActionsDb = {
     await initAgents(db);
     const snapshot = await db.collection('extracted_actions')
       .where('conversation_id', '==', conversationId)
-      .orderBy('id', 'asc')
       .get();
-    return snapshot.docs.map(doc => {
+    // Sort by id in memory
+    const actions = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: parseInt(doc.id) || 0,
@@ -452,6 +452,8 @@ export const extractedActionsDb = {
         status: data.status,
       } as ExtractedAction;
     });
+    // Sort by id in memory
+    return actions.sort((a, b) => a.id - b.id);
   },
   
   create: async (action: Omit<ExtractedAction, 'id' | 'status'>): Promise<ExtractedAction> => {
